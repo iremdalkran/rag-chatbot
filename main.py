@@ -63,12 +63,9 @@ async def chat(q: Question):
     if not question:
         raise HTTPException(status_code=400, detail="Soru boş olamaz.")
 
-    # 2. Henüz doküman yüklenmemiş mi?
+        # 2. Henüz doküman yüklenmemiş mi?
     if collection.count() == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Henüz bir doküman yüklenmedi. Önce bir PDF yükleyin.",
-        )
+        return {"answer": "Merhaba! Henüz bir doküman yüklemediniz. Lütfen önce yukarıdan bir PDF yükleyin, sonra sorularınızı seve seve yanıtlarım. 📄"}
 
     try:
         answer = ask(question)
