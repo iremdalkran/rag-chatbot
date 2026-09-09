@@ -2,6 +2,9 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Doküman Chatbot</title>
   <style>
     body {
@@ -118,6 +121,7 @@
 
       statusEl.innerHTML = `<span class="spinner"></span> Yükleniyor...`;
       uploadBtn.disabled = true;
+      const startTime = Date.now();
 
       const formData = new FormData();
       formData.append("file", file);
@@ -129,6 +133,11 @@
         });
 
         const data = await response.json();
+
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 600) {
+          await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
+        }
 
         if (!response.ok) {
           statusEl.textContent = `Hata: ${data.detail}`;
@@ -169,7 +178,6 @@
 
         const data = await response.json();
 
-        // Gösterge en az 600ms görünsün, çok hızlı cevaplarda bile fark edilsin
         const elapsed = Date.now() - startTime;
         if (elapsed < 600) {
           await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
