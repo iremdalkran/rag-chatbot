@@ -40,6 +40,40 @@
       flex: 1;
       padding: 8px;
     }
+    /* Spinner animasyonu */
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #ccc;
+      border-top-color: #555;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    #upload-status {
+      display: flex;
+      align-items: center;
+    }
+    /* "Yazıyor..." göstergesi için üç nokta animasyonu */
+    .typing-dots span {
+      animation: blink 1.4s infinite;
+      animation-fill-mode: both;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink {
+      0%, 80%, 100% { opacity: 0.2; }
+      40% { opacity: 1; }
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
@@ -48,7 +82,7 @@
 
   <div>
     <input type="file" id="pdf-input" accept=".pdf">
-    <button onclick="uploadPdf()">Dokümanı Yükle</button>
+    <button id="upload-btn" onclick="uploadPdf()">Dokümanı Yükle</button>
     <p id="upload-status"></p>
   </div>
 
@@ -58,7 +92,7 @@
 
   <div id="input-area">
     <input type="text" id="question-input" placeholder="Bir soru sor...">
-    <button onclick="sendQuestion()">Gönder</button>
+    <button id="send-btn" onclick="sendQuestion()">Gönder</button>
   </div>
 
   <script>
@@ -68,54 +102,82 @@
       const fileInput = document.getElementById("pdf-input");
       const file = fileInput.files[0];
       const statusEl = document.getElementById("upload-status");
+      const uploadBtn = document.getElementById("upload-btn");
 
       if (!file) {
         statusEl.textContent = "Önce bir dosya seç.";
         return;
       }
 
-      statusEl.textContent = "Yükleniyor...";
+      // Spinner'ı göster, butonu kilitle
+      statusEl.innerHTML = `<span class="spinner"></span> Yükleniyor...`;
+      uploadBtn.disabled = true;
 
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch(`${API_URL}/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      try {
+        const response = await fetch(`${API_URL}/upload`, {
+          method: "POST",
+          body: formData,
+        });
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (!response.ok) {
-        statusEl.textContent = `Hata: ${data.detail}`;
-        return;
+        if (!response.ok) {
+          statusEl.textContent = `Hata: ${data.detail}`;
+          return;
+        }
+
+        statusEl.textContent = `Yüklendi: ${data.dosya}`;
+      } catch (err) {
+        statusEl.textContent = "Bağlantı hatası, tekrar deneyin.";
+      } finally {
+        uploadBtn.disabled = false;
       }
-
-      statusEl.textContent = `Yüklendi: ${data.dosya}`;
     }
 
     async function sendQuestion() {
       const input = document.getElementById("question-input");
+      const sendBtn = document.getElementById("send-btn");
       const question = input.value.trim();
-      if (!question) return;
 
-      addMessage(question, "user-message");
-      input.value = "";
-
-      const response = await fetch(`${API_URL}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: question }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        addMessage(`Hata: ${data.detail}`, "bot-message");
+      if (!question) {
+        addMessage("Lütfen bir soru yazın.", "bot-message");
         return;
       }
 
-      addMessage(data.answer, "bot-message");
+      addMessage(question, "user-message");
+      input.value = "";
+      sendBtn.disabled = true;
+
+      // "Yazıyor..." göstergesini ekle
+      const typingEl = addTypingIndicator();
+
+      try {
+        const response = await fetch(`${API_URL}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question: question }),
+        });
+
+        const data = await response.json();
+
+        // "Yazıyor..." göstergesini kaldır
+        typingEl.remove();
+
+        if (!response.ok) {
+          addMessage(`Hata: ${data.detail}`, "bot-message");
+          return;
+        }
+
+        addMessage(data.answer, "bot-message");
+      } catch (err) {
+        typingEl.remove();
+        addMessage("Bağlantı hatası, tekrar deneyin.", "bot-message");
+      } finally {
+        sendBtn.disabled = false;
+      }
     }
 
     function addMessage(text, className) {
@@ -125,6 +187,17 @@
       msgEl.textContent = text;
       chatBox.appendChild(msgEl);
       chatBox.scrollTop = chatBox.scrollHeight;
+      return msgEl;
+    }
+
+    function addTypingIndicator() {
+      const chatBox = document.getElementById("chat-box");
+      const msgEl = document.createElement("div");
+      msgEl.className = "message bot-message typing-dots";
+      msgEl.innerHTML = "<span>.</span><span>.</span><span>.</span>";
+      chatBox.appendChild(msgEl);
+      chatBox.scrollTop = chatBox.scrollHeight;
+      return msgEl;
     }
 
     document.getElementById("question-input").addEventListener("keypress", (e) => {
