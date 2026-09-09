@@ -40,7 +40,6 @@
       flex: 1;
       padding: 8px;
     }
-    /* Spinner animasyonu */
     .spinner {
       display: inline-block;
       width: 14px;
@@ -59,16 +58,24 @@
       display: flex;
       align-items: center;
     }
-    /* "Yazıyor..." göstergesi için üç nokta animasyonu */
+    .typing-dots {
+      display: inline-flex;
+      gap: 4px;
+      padding: 10px 14px;
+    }
     .typing-dots span {
+      width: 8px;
+      height: 8px;
+      background: #888;
+      border-radius: 50%;
       animation: blink 1.4s infinite;
       animation-fill-mode: both;
     }
     .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
     .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
     @keyframes blink {
-      0%, 80%, 100% { opacity: 0.2; }
-      40% { opacity: 1; }
+      0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+      40% { opacity: 1; transform: scale(1); }
     }
     button:disabled {
       opacity: 0.5;
@@ -109,7 +116,6 @@
         return;
       }
 
-      // Spinner'ı göster, butonu kilitle
       statusEl.innerHTML = `<span class="spinner"></span> Yükleniyor...`;
       uploadBtn.disabled = true;
 
@@ -151,8 +157,8 @@
       input.value = "";
       sendBtn.disabled = true;
 
-      // "Yazıyor..." göstergesini ekle
       const typingEl = addTypingIndicator();
+      const startTime = Date.now();
 
       try {
         const response = await fetch(`${API_URL}/chat`, {
@@ -163,7 +169,12 @@
 
         const data = await response.json();
 
-        // "Yazıyor..." göstergesini kaldır
+        // Gösterge en az 600ms görünsün, çok hızlı cevaplarda bile fark edilsin
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 600) {
+          await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
+        }
+
         typingEl.remove();
 
         if (!response.ok) {
@@ -194,7 +205,7 @@
       const chatBox = document.getElementById("chat-box");
       const msgEl = document.createElement("div");
       msgEl.className = "message bot-message typing-dots";
-      msgEl.innerHTML = "<span>.</span><span>.</span><span>.</span>";
+      msgEl.innerHTML = "<span></span><span></span><span></span>";
       chatBox.appendChild(msgEl);
       chatBox.scrollTop = chatBox.scrollHeight;
       return msgEl;
