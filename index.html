@@ -1,228 +1,219 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-  <title>Doküman Chatbot</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      max-width: 600px;
-      margin: 40px auto;
-      padding: 0 20px;
-    }
-    #chat-box {
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      height: 400px;
-      overflow-y: auto;
-      padding: 12px;
-      margin-bottom: 12px;
-    }
-    .message {
-      margin-bottom: 10px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      max-width: 80%;
-    }
-    .user-message {
-      background: #daf1ff;
-      margin-left: auto;
-      text-align: right;
-    }
-    .bot-message {
-      background: #f0f0f0;
-    }
-    #input-area {
-      display: flex;
-      gap: 8px;
-    }
-    #question-input {
-      flex: 1;
-      padding: 8px;
-    }
-    .spinner {
-      display: inline-block;
-      width: 14px;
-      height: 14px;
-      border: 2px solid #ccc;
-      border-top-color: #555;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      vertical-align: middle;
-      margin-right: 6px;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    #upload-status {
-      display: flex;
-      align-items: center;
-    }
-    .typing-dots {
-      display: inline-flex;
-      gap: 4px;
-      padding: 10px 14px;
-    }
-    .typing-dots span {
-      width: 8px;
-      height: 8px;
-      background: #888;
-      border-radius: 50%;
-      animation: blink 1.4s infinite;
-      animation-fill-mode: both;
-    }
-    .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-    .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes blink {
-      0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
-      40% { opacity: 1; transform: scale(1); }
-    }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Doküman Chatbot</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script>
+  tailwind.config = { darkMode: 'class' };
+</script>
+<style>
+  html { scroll-behavior: smooth; }
+  body { font-family: system-ui, -apple-system, sans-serif; }
+  #chat-box::-webkit-scrollbar { width: 6px; }
+  #chat-box::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+  .dark #chat-box::-webkit-scrollbar-thumb { background: #475569; }
+  .spinner {
+    display:inline-block; width:14px; height:14px;
+    border:2px solid rgba(148,163,184,.4); border-top-color:#0ea5e9;
+    border-radius:50%; animation:spin .7s linear infinite; margin-right:6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .typing-dots { display:inline-flex; gap:4px; padding:12px 16px; }
+  .typing-dots span {
+    width:7px; height:7px; border-radius:50%;
+    background:#94a3b8; animation:blink 1.4s infinite; animation-fill-mode:both;
+  }
+  .typing-dots span:nth-child(2) { animation-delay:.2s; }
+  .typing-dots span:nth-child(3) { animation-delay:.4s; }
+  @keyframes blink { 0%,80%,100% { opacity:.3; transform:scale(.85); } 40% { opacity:1; transform:scale(1); } }
+</style>
 </head>
-<body>
+<body class="h-full bg-slate-50 dark:bg-slate-900 transition-colors">
 
-  <h2>Doküman Chatbot</h2>
+<div class="flex flex-col h-[100dvh] max-w-2xl mx-auto bg-white dark:bg-slate-800 shadow-sm transition-colors">
 
-  <div>
-    <input type="file" id="pdf-input" accept=".pdf">
-    <button id="upload-btn" onclick="uploadPdf()">Dokümanı Yükle</button>
-    <p id="upload-status"></p>
+  <!-- Header -->
+  <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-lg bg-sky-500 flex items-center justify-center text-white">
+        <i class="fa-solid fa-file-lines text-sm"></i>
+      </div>
+      <h1 class="font-semibold text-slate-800 dark:text-slate-100 text-sm sm:text-base">Doküman Chatbot</h1>
+    </div>
+    <button id="theme-toggle" aria-label="Tema değiştir"
+      class="w-9 h-9 flex items-center justify-center rounded-full text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">
+      <i class="fa-solid fa-moon dark:hidden"></i>
+      <i class="fa-solid fa-sun hidden dark:inline"></i>
+    </button>
+  </header>
+
+  <!-- Upload bar -->
+  <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+    <div class="flex flex-col sm:flex-row gap-2">
+      <label for="pdf-input"
+        class="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-500 dark:text-slate-300 cursor-pointer truncate">
+        <i class="fa-solid fa-paperclip flex-shrink-0"></i>
+        <span id="file-label-text" class="truncate">PDF seç...</span>
+      </label>
+      <input type="file" id="pdf-input" accept=".pdf" class="hidden">
+      <button id="upload-btn" onclick="uploadPdf()"
+        class="bg-sky-500 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        Dokümanı Yükle
+      </button>
+    </div>
+    <p id="upload-status" class="flex items-center mt-2 text-xs text-slate-500 dark:text-slate-400 min-h-[1em]"></p>
   </div>
 
-  <hr>
+  <!-- Messages -->
+  <div id="chat-box" class="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3"></div>
 
-  <div id="chat-box"></div>
-
-  <div id="input-area">
-    <input type="text" id="question-input" placeholder="Bir soru sor...">
-    <button id="send-btn" onclick="sendQuestion()">Gönder</button>
+  <!-- Composer -->
+  <div class="border-t border-slate-200 dark:border-slate-700 p-3 flex-shrink-0" style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));">
+    <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 rounded-full pl-4 pr-1.5 py-1.5">
+      <input type="text" id="question-input" placeholder="Bir soru sor..."
+        class="flex-1 bg-transparent outline-none text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 min-w-0">
+      <button id="send-btn" onclick="sendQuestion()" aria-label="Gönder"
+        class="w-9 h-9 flex-shrink-0 rounded-full bg-sky-500 hover:bg-sky-600 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors">
+        <i class="fa-solid fa-paper-plane text-xs"></i>
+      </button>
+    </div>
   </div>
 
-  <script>
-    const API_URL = "https://rag-chatbot-lw84.onrender.com";
+</div>
 
-    async function uploadPdf() {
-      const fileInput = document.getElementById("pdf-input");
-      const file = fileInput.files[0];
-      const statusEl = document.getElementById("upload-status");
-      const uploadBtn = document.getElementById("upload-btn");
+<script>
+const API_URL = "https://rag-chatbot-lw84.onrender.com";
 
-      if (!file) {
-        statusEl.textContent = "Önce bir dosya seç.";
-        return;
-      }
+/* --- Tema (light/dark) --- */
+const themeToggle = document.getElementById("theme-toggle");
+function applyTheme(dark) {
+  document.documentElement.classList.toggle("dark", dark);
+  localStorage.setItem("theme", dark ? "dark" : "light");
+}
+const savedTheme = localStorage.getItem("theme");
+const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+applyTheme(savedTheme ? savedTheme === "dark" : prefersDark);
+themeToggle.addEventListener("click", () => {
+  applyTheme(!document.documentElement.classList.contains("dark"));
+});
 
-      statusEl.innerHTML = `<span class="spinner"></span> Yükleniyor...`;
-      uploadBtn.disabled = true;
-      const startTime = Date.now();
+/* --- Dosya seçimi --- */
+document.getElementById("pdf-input").addEventListener("change", () => {
+  const fileInput = document.getElementById("pdf-input");
+  const labelText = document.getElementById("file-label-text");
+  labelText.textContent = fileInput.files[0] ? fileInput.files[0].name : "PDF seç...";
+});
 
-      const formData = new FormData();
-      formData.append("file", file);
+/* --- PDF yükleme --- */
+async function uploadPdf() {
+  const fileInput = document.getElementById("pdf-input");
+  const file = fileInput.files[0];
+  const statusEl = document.getElementById("upload-status");
+  const uploadBtn = document.getElementById("upload-btn");
 
-      try {
-        const response = await fetch(`${API_URL}/upload`, {
-          method: "POST",
-          body: formData,
-        });
+  if (!file) {
+    statusEl.textContent = "Önce bir dosya seç.";
+    return;
+  }
 
-        const data = await response.json();
+  statusEl.innerHTML = `<span class="spinner"></span> Yükleniyor...`;
+  uploadBtn.disabled = true;
 
-        const elapsed = Date.now() - startTime;
-        if (elapsed < 600) {
-          await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
-        }
+  const startTime = Date.now();
+  const formData = new FormData();
+  formData.append("file", file);
 
-        if (!response.ok) {
-          statusEl.textContent = `Hata: ${data.detail}`;
-          return;
-        }
+  try {
+    const response = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
+    const data = await response.json();
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
 
-        statusEl.textContent = `Yüklendi: ${data.dosya}`;
-      } catch (err) {
-        statusEl.textContent = "Bağlantı hatası, tekrar deneyin.";
-      } finally {
-        uploadBtn.disabled = false;
-      }
+    if (!response.ok) {
+      statusEl.textContent = `Hata: ${data.detail}`;
+      return;
     }
+    statusEl.textContent = `Yüklendi: ${data.dosya}`;
+  } catch (err) {
+    statusEl.textContent = "Bağlantı hatası, tekrar deneyin.";
+  } finally {
+    uploadBtn.disabled = false;
+  }
+}
 
-    async function sendQuestion() {
-      const input = document.getElementById("question-input");
-      const sendBtn = document.getElementById("send-btn");
-      const question = input.value.trim();
+/* --- Soru gönderme --- */
+async function sendQuestion() {
+  const input = document.getElementById("question-input");
+  const sendBtn = document.getElementById("send-btn");
+  const question = input.value.trim();
+  if (!question) return;
 
-      if (!question) {
-        addMessage("Lütfen bir soru yazın.", "bot-message");
-        return;
-      }
+  addMessage(question, "user");
+  input.value = "";
+  sendBtn.disabled = true;
 
-      addMessage(question, "user-message");
-      input.value = "";
-      sendBtn.disabled = true;
+  const typingEl = addTypingIndicator();
+  const startTime = Date.now();
 
-      const typingEl = addTypingIndicator();
-      const startTime = Date.now();
-
-      try {
-        const response = await fetch(`${API_URL}/chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: question }),
-        });
-
-        const data = await response.json();
-
-        const elapsed = Date.now() - startTime;
-        if (elapsed < 600) {
-          await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
-        }
-
-        typingEl.remove();
-
-        if (!response.ok) {
-          addMessage(`Hata: ${data.detail}`, "bot-message");
-          return;
-        }
-
-        addMessage(data.answer, "bot-message");
-      } catch (err) {
-        typingEl.remove();
-        addMessage("Bağlantı hatası, tekrar deneyin.", "bot-message");
-      } finally {
-        sendBtn.disabled = false;
-      }
-    }
-
-    function addMessage(text, className) {
-      const chatBox = document.getElementById("chat-box");
-      const msgEl = document.createElement("div");
-      msgEl.className = `message ${className}`;
-      msgEl.textContent = text;
-      chatBox.appendChild(msgEl);
-      chatBox.scrollTop = chatBox.scrollHeight;
-      return msgEl;
-    }
-
-    function addTypingIndicator() {
-      const chatBox = document.getElementById("chat-box");
-      const msgEl = document.createElement("div");
-      msgEl.className = "message bot-message typing-dots";
-      msgEl.innerHTML = "<span></span><span></span><span></span>";
-      chatBox.appendChild(msgEl);
-      chatBox.scrollTop = chatBox.scrollHeight;
-      return msgEl;
-    }
-
-    document.getElementById("question-input").addEventListener("keypress", (e) => {
-      if (e.key === "Enter") sendQuestion();
+  try {
+    const response = await fetch(`${API_URL}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
     });
-  </script>
+    const data = await response.json();
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
 
+    typingEl.remove();
+
+    if (!response.ok) {
+      addMessage(`Hata: ${data.detail}`, "bot");
+      return;
+    }
+    addMessage(data.answer, "bot");
+  } catch (err) {
+    typingEl.remove();
+    addMessage("Bağlantı hatası, tekrar deneyin.", "bot");
+  } finally {
+    sendBtn.disabled = false;
+  }
+}
+
+function addMessage(text, who) {
+  const chatBox = document.getElementById("chat-box");
+  const wrap = document.createElement("div");
+  wrap.className = who === "user" ? "flex justify-end" : "flex justify-start";
+  const bubble = document.createElement("div");
+  bubble.className = who === "user"
+    ? "max-w-[85%] bg-sky-500 text-white text-sm rounded-2xl rounded-br-md px-4 py-2.5 whitespace-pre-wrap break-words"
+    : "max-w-[85%] bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm rounded-2xl rounded-bl-md px-4 py-2.5 whitespace-pre-wrap break-words";
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  chatBox.appendChild(wrap);
+  chatBox.scrollTop = chatBox.scrollHeight;
+  return wrap;
+}
+
+function addTypingIndicator() {
+  const chatBox = document.getElementById("chat-box");
+  const wrap = document.createElement("div");
+  wrap.className = "flex justify-start";
+  wrap.innerHTML = `<div class="typing-dots bg-slate-100 dark:bg-slate-700 rounded-2xl rounded-bl-md"><span></span><span></span><span></span></div>`;
+  chatBox.appendChild(wrap);
+  chatBox.scrollTop = chatBox.scrollHeight;
+  return wrap;
+}
+
+document.getElementById("question-input").addEventListener("keypress", (e) => {
+  if (e.key === "Enter") sendQuestion();
+});
+</script>
 </body>
 </html>
