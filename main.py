@@ -67,10 +67,11 @@ async def chat(q: Question):
     if collection.count() == 0:
         return {"answer": "Merhaba! Henüz bir doküman yüklemediniz. Lütfen önce yukarıdan bir PDF yükleyin, sonra sorularınızı seve seve yanıtlarım. 📄"}
 
-    try:
+       try:
         answer = ask(question)
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Cevap üretilirken bir hata oluştu, lütfen tekrar deneyin.")
+        print(f"Hata (chat): {e}")
+        return {"answer": "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"}
 
     return {"answer": answer}
 
