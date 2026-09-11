@@ -53,12 +53,12 @@
     </button>
   </header>
 
-  <!-- Upload bar -->
+  <!-- Upload bar: PDF -->
   <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
     <div class="flex flex-col sm:flex-row gap-2">
       <label for="pdf-input"
         class="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-500 dark:text-slate-300 cursor-pointer truncate">
-        <i class="fa-solid fa-paperclip flex-shrink-0"></i>
+        <i class="fa-solid fa-file-pdf flex-shrink-0"></i>
         <span id="file-label-text" class="truncate">PDF seç...</span>
       </label>
       <input type="file" id="pdf-input" accept=".pdf" class="hidden">
@@ -70,13 +70,30 @@
     <p id="upload-status" class="flex items-center mt-2 text-xs text-slate-500 dark:text-slate-400 min-h-[1em]"></p>
   </div>
 
+  <!-- Upload bar: Excel -->
+  <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+    <div class="flex flex-col sm:flex-row gap-2">
+      <label for="excel-input"
+        class="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-500 dark:text-slate-300 cursor-pointer truncate">
+        <i class="fa-solid fa-file-excel flex-shrink-0"></i>
+        <span id="excel-label-text" class="truncate">Excel seç (.xlsx)...</span>
+      </label>
+      <input type="file" id="excel-input" accept=".xlsx,.xls" class="hidden">
+      <button id="excel-upload-btn" onclick="uploadExcel()"
+        class="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        Excel Yükle
+      </button>
+    </div>
+    <p id="excel-status" class="flex items-center mt-2 text-xs text-slate-500 dark:text-slate-400 min-h-[1em]"></p>
+  </div>
+
   <!-- Messages -->
   <div id="chat-box" class="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3"></div>
 
   <!-- Composer -->
   <div class="border-t border-slate-200 dark:border-slate-700 p-3 flex-shrink-0" style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));">
     <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 rounded-full pl-4 pr-1.5 py-1.5">
-      <input type="text" id="question-input" placeholder="Bir soru sor..."
+      <input type="text" id="question-input" placeholder="Bir soru sor ya da 'grafik yap' de..."
         class="flex-1 bg-transparent outline-none text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 min-w-0">
       <button id="send-btn" onclick="sendQuestion()" aria-label="Gönder"
         class="w-9 h-9 flex-shrink-0 rounded-full bg-sky-500 hover:bg-sky-600 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors">
@@ -103,11 +120,18 @@ themeToggle.addEventListener("click", () => {
   applyTheme(!document.documentElement.classList.contains("dark"));
 });
 
-/* --- Dosya seçimi --- */
+/* --- PDF dosya seçimi --- */
 document.getElementById("pdf-input").addEventListener("change", () => {
   const fileInput = document.getElementById("pdf-input");
   const labelText = document.getElementById("file-label-text");
   labelText.textContent = fileInput.files[0] ? fileInput.files[0].name : "PDF seç...";
+});
+
+/* --- Excel dosya seçimi --- */
+document.getElementById("excel-input").addEventListener("change", () => {
+  const fileInput = document.getElementById("excel-input");
+  const labelText = document.getElementById("excel-label-text");
+  labelText.textContent = fileInput.files[0] ? fileInput.files[0].name : "Excel seç (.xlsx)...";
 });
 
 /* --- PDF yükleme --- */
@@ -147,6 +171,44 @@ async function uploadPdf() {
   }
 }
 
+/* --- Excel yükleme --- */
+async function uploadExcel() {
+  const fileInput = document.getElementById("excel-input");
+  const file = fileInput.files[0];
+  const statusEl = document.getElementById("excel-status");
+  const uploadBtn = document.getElementById("excel-upload-btn");
+
+  if (!file) {
+    statusEl.textContent = "Önce bir dosya seç.";
+    return;
+  }
+
+  statusEl.innerHTML = `<span class="spinner"></span> Yükleniyor...`;
+  uploadBtn.disabled = true;
+
+  const startTime = Date.now();
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const response = await fetch(`${API_URL}/upload-excel`, { method: "POST", body: formData });
+    const data = await response.json();
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
+
+    if (!response.ok) {
+      statusEl.textContent = `Hata: ${data.detail}`;
+      return;
+    }
+    statusEl.textContent = `Yüklendi: ${data.dosya} (${data.satir_sayisi} satır)`;
+    addMessage(`Excel dosyası yüklendi. Artık "grafik yap" diyerek bu veriden grafik isteyebilirsin.`, "bot");
+  } catch (err) {
+    statusEl.textContent = "Bağlantı hatası, tekrar deneyin.";
+  } finally {
+    uploadBtn.disabled = false;
+  }
+}
+
 /* --- Soru gönderme --- */
 async function sendQuestion() {
   const input = document.getElementById("question-input");
@@ -177,7 +239,7 @@ async function sendQuestion() {
       addMessage(`Hata: ${data.detail}`, "bot");
       return;
     }
-    addMessage(data.answer, "bot");
+    addMessage(data.answer, "bot", data.chart_base64);
   } catch (err) {
     typingEl.remove();
     addMessage("Bağlantı hatası, tekrar deneyin.", "bot");
@@ -186,7 +248,7 @@ async function sendQuestion() {
   }
 }
 
-function addMessage(text, who) {
+function addMessage(text, who, chartBase64) {
   const chatBox = document.getElementById("chat-box");
   const wrap = document.createElement("div");
   wrap.className = who === "user" ? "flex justify-end" : "flex justify-start";
@@ -195,6 +257,15 @@ function addMessage(text, who) {
     ? "max-w-[85%] bg-sky-500 text-white text-sm rounded-2xl rounded-br-md px-4 py-2.5 whitespace-pre-wrap break-words"
     : "max-w-[85%] bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm rounded-2xl rounded-bl-md px-4 py-2.5 whitespace-pre-wrap break-words";
   bubble.textContent = text;
+
+  if (chartBase64) {
+    const img = document.createElement("img");
+    img.src = `data:image/png;base64,${chartBase64}`;
+    img.alt = "Oluşturulan grafik";
+    img.className = "mt-2 rounded-lg max-w-full";
+    bubble.appendChild(img);
+  }
+
   wrap.appendChild(bubble);
   chatBox.appendChild(wrap);
   chatBox.scrollTop = chatBox.scrollHeight;
