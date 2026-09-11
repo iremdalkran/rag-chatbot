@@ -32,6 +32,15 @@ excel_df = None
 CHART_KEYWORDS = ["grafik", "çizdir", "görselleştir", "chart", "plot", "görsel"]
 
 
+def detect_chart_type(text: str) -> str:
+    text_lower = text.lower()
+    if any(k in text_lower for k in ["pasta", "pie"]):
+        return "pie"
+    if any(k in text_lower for k in ["çizgi", "line", "trend"]):
+        return "line"
+    return "bar"
+
+
 class Question(BaseModel):
     question: str
 
@@ -41,8 +50,8 @@ def is_chart_request(text: str) -> bool:
     return any(keyword in text_lower for keyword in CHART_KEYWORDS)
 
 
-def generate_chart(df: pd.DataFrame) -> str:
-    """Excel verisinden basit bir bar chart üretir, base64 PNG string döner."""
+def generate_chart(df: pd.DataFrame, chart_type: str = "bar") -> str:
+    """Excel verisinden grafik üretir, base64 PNG string döner."""
     numeric_cols = df.select_dtypes(include="number").columns.tolist()
     if not numeric_cols:
         raise ValueError("Excel dosyasında sayısal bir sütun bulunamadı.")
@@ -52,23 +61,37 @@ def generate_chart(df: pd.DataFrame) -> str:
     labels = df[non_numeric_cols[0]].astype(str) if non_numeric_cols else df.index.astype(str)
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    x = range(len(df))
-    width = 0.8 / len(numeric_cols)
 
-    for i, col in enumerate(numeric_cols):
-        ax.bar([p + i * width for p in x], df[col], width=width, label=col)
+    if chart_type == "pie":
+        # Pasta grafik sadece tek sayısal sütunla anlamlı, ilkini kullanıyoruz
+        col = numeric_cols[0]
+        ax.pie(df[col], labels=labels, autopct="%1.1f%%")
+        ax.set_title(f"{col} Dağılımı")
 
-    ax.set_xticks([p + width * (len(numeric_cols) - 1) / 2 for p in x])
-    ax.set_xticklabels(labels, rotation=45, ha="right")
-    ax.legend()
-    ax.set_title("Yüklenen Excel Verisi")
+    elif chart_type == "line":
+        x = range(len(df))
+        for col in numeric_cols:
+            ax.plot(x, df[col], marker="o", label=col)
+        ax.set_xticks(list(x))
+        ax.set_xticklabels(labels, rotation=45, ha="right")
+        ax.legend()
+        ax.set_title("Yüklenen Excel Verisi")
+
+    else:  # bar (varsayılan)
+        x = range(len(df))
+        width = 0.8 / len(numeric_cols)
+        for i, col in enumerate(numeric_cols):
+            ax.bar([p + i * width for p in x], df[col], width=width, label=col)
+        ax.set_xticks([p + width * (len(numeric_cols) - 1) / 2 for p in x])
+        ax.set_xticklabels(labels, rotation=45, ha="right")
+        ax.legend()
+        ax.set_title("Yüklenen Excel Verisi")
+
     fig.tight_layout()
-
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130)
     plt.close(fig)
     buf.seek(0)
-
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
@@ -161,7 +184,8 @@ async def chat(q: Question):
         if excel_df is None:
             return {"answer": "Grafik oluşturabilmem için önce bir Excel dosyası yüklemen gerekiyor. 📊"}
         try:
-            chart_base64 = generate_chart(excel_df)
+            chart_type = detect_chart_type(question)
+            chart_base64 = generate_chart(excel_df, chart_type)
             return {"answer": "İşte yüklediğin veriye ait grafik:", "chart_base64": chart_base64}
         except Exception as e:
             print(f"Hata (chart): {e}")
