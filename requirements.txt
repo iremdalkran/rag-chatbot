@@ -7,3 +7,6 @@ voyageai
 anthropic
 chromadb
 pydantic
+pandas
+openpyxl
+matplotlib
