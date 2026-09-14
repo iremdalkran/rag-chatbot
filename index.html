@@ -9,6 +9,7 @@
 <title>Doküman Chatbot</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script>
   tailwind.config = { darkMode: 'class' };
 </script>
@@ -32,6 +33,31 @@
   .typing-dots span:nth-child(2) { animation-delay:.2s; }
   .typing-dots span:nth-child(3) { animation-delay:.4s; }
   @keyframes blink { 0%,80%,100% { opacity:.3; transform:scale(.85); } 40% { opacity:1; transform:scale(1); } }
+
+  /* --- Data RAG kartları (tablo / sql / grafik / öneriler) --- */
+  .data-table-wrap { overflow-x: auto; max-width: 100%; }
+  .data-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  .data-table th, .data-table td {
+    padding: 5px 8px; text-align: left; white-space: nowrap;
+    border-bottom: 1px solid rgba(148,163,184,.35);
+  }
+  .data-table th { font-weight: 600; color: #64748b; }
+  .dark .data-table th { color: #94a3b8; }
+  .sql-toggle-btn {
+    font-size: 11px; color: #0ea5e9; cursor: pointer; margin-top: 6px; display:inline-block;
+  }
+  .sql-block {
+    display: none; background: #0f172a; color: #cbd5e1; font-family: ui-monospace, monospace;
+    font-size: 11px; padding: 8px 10px; border-radius: 8px; margin-top: 6px; white-space: pre-wrap;
+  }
+  .sql-block.open { display: block; }
+  .suggestion-chip {
+    display: block; width: 100%; text-align: left; font-size: 12px;
+    background: rgba(255,255,255,.6); border: 1px solid rgba(148,163,184,.4);
+    border-radius: 8px; padding: 6px 10px; margin-top: 6px; cursor: pointer;
+  }
+  .dark .suggestion-chip { background: rgba(15,23,42,.4); }
+  .suggestion-chip:hover { background: rgba(14,165,233,.12); }
 </style>
 </head>
 <body class="h-full bg-slate-50 dark:bg-slate-900 transition-colors">
@@ -70,18 +96,18 @@
     <p id="upload-status" class="flex items-center mt-2 text-xs text-slate-500 dark:text-slate-400 min-h-[1em]"></p>
   </div>
 
-  <!-- Upload bar: Excel -->
+  <!-- Upload bar: Excel / CSV -->
   <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
     <div class="flex flex-col sm:flex-row gap-2">
       <label for="excel-input"
         class="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-500 dark:text-slate-300 cursor-pointer truncate">
         <i class="fa-solid fa-file-excel flex-shrink-0"></i>
-        <span id="excel-label-text" class="truncate">Excel seç (.xlsx)...</span>
+        <span id="excel-label-text" class="truncate">Excel/CSV seç...</span>
       </label>
-      <input type="file" id="excel-input" accept=".xlsx,.xls" class="hidden">
+      <input type="file" id="excel-input" accept=".xlsx,.xls,.csv" class="hidden">
       <button id="excel-upload-btn" onclick="uploadExcel()"
         class="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-        Excel Yükle
+        Veri Yükle
       </button>
     </div>
     <p id="excel-status" class="flex items-center mt-2 text-xs text-slate-500 dark:text-slate-400 min-h-[1em]"></p>
@@ -106,6 +132,7 @@
 
 <script>
 const API_URL = "https://rag-chatbot-lw84.onrender.com";
+let chartCounter = 0;
 
 /* --- Tema (light/dark) --- */
 const themeToggle = document.getElementById("theme-toggle");
@@ -127,11 +154,11 @@ document.getElementById("pdf-input").addEventListener("change", () => {
   labelText.textContent = fileInput.files[0] ? fileInput.files[0].name : "PDF seç...";
 });
 
-/* --- Excel dosya seçimi --- */
+/* --- Excel/CSV dosya seçimi --- */
 document.getElementById("excel-input").addEventListener("change", () => {
   const fileInput = document.getElementById("excel-input");
   const labelText = document.getElementById("excel-label-text");
-  labelText.textContent = fileInput.files[0] ? fileInput.files[0].name : "Excel seç (.xlsx)...";
+  labelText.textContent = fileInput.files[0] ? fileInput.files[0].name : "Excel/CSV seç...";
 });
 
 /* --- PDF yükleme --- */
@@ -171,7 +198,7 @@ async function uploadPdf() {
   }
 }
 
-/* --- Excel yükleme --- */
+/* --- Excel/CSV yükleme --- */
 async function uploadExcel() {
   const fileInput = document.getElementById("excel-input");
   const file = fileInput.files[0];
@@ -201,7 +228,9 @@ async function uploadExcel() {
       return;
     }
     statusEl.textContent = `Yüklendi: ${data.dosya} (${data.satir_sayisi} satır)`;
-    addMessage(`Excel dosyası yüklendi. Artık "grafik yap" diyerek bu veriden grafik isteyebilirsin.`, "bot");
+    // Not: Artık anahtar kelimeyle ("grafik yap") tetiklenen tek bir statik grafik yok.
+    // Her soru için Claude ilgili SQL'i üretip çalıştırıyor ve sonucu tablo + grafik olarak dönüyor.
+    addMessage(`"${data.dosya}" yüklendi. Artık bu veriyle ilgili istediğin soruyu sorabilirsin, örn: "En çok satan 3 ürün hangisi?"`, "bot");
   } catch (err) {
     statusEl.textContent = "Bağlantı hatası, tekrar deneyin.";
   } finally {
@@ -210,14 +239,14 @@ async function uploadExcel() {
 }
 
 /* --- Soru gönderme --- */
-async function sendQuestion() {
+async function sendQuestion(overrideText) {
   const input = document.getElementById("question-input");
   const sendBtn = document.getElementById("send-btn");
-  const question = input.value.trim();
+  const question = (overrideText !== undefined ? overrideText : input.value).trim();
   if (!question) return;
 
   addMessage(question, "user");
-  input.value = "";
+  if (overrideText === undefined) input.value = "";
   sendBtn.disabled = true;
 
   const typingEl = addTypingIndicator();
@@ -239,7 +268,7 @@ async function sendQuestion() {
       addMessage(`Hata: ${data.detail}`, "bot");
       return;
     }
-    addMessage(data.answer, "bot", data.chart_base64);
+    addMessage(data.answer, "bot", data);
   } catch (err) {
     typingEl.remove();
     addMessage("Bağlantı hatası, tekrar deneyin.", "bot");
@@ -248,27 +277,78 @@ async function sendQuestion() {
   }
 }
 
-function addMessage(text, who, chartBase64) {
+function addMessage(text, who, data) {
   const chatBox = document.getElementById("chat-box");
   const wrap = document.createElement("div");
   wrap.className = who === "user" ? "flex justify-end" : "flex justify-start";
   const bubble = document.createElement("div");
   bubble.className = who === "user"
     ? "max-w-[85%] bg-sky-500 text-white text-sm rounded-2xl rounded-br-md px-4 py-2.5 whitespace-pre-wrap break-words"
-    : "max-w-[85%] bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm rounded-2xl rounded-bl-md px-4 py-2.5 whitespace-pre-wrap break-words";
+    : "max-w-[90%] bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm rounded-2xl rounded-bl-md px-4 py-2.5 whitespace-pre-wrap break-words";
   bubble.textContent = text;
 
-  if (chartBase64) {
-    const img = document.createElement("img");
-    img.src = `data:image/png;base64,${chartBase64}`;
-    img.alt = "Oluşturulan grafik";
-    img.className = "mt-2 rounded-lg max-w-full";
-    bubble.appendChild(img);
-  }
+  if (data && data.table) bubble.appendChild(renderDataTable(data.table));
+  if (data && data.sql) bubble.appendChild(renderSqlToggle(data.sql));
+  if (data && data.chart) bubble.appendChild(renderChart(data.chart));
+  if (data && data.suggestions && data.suggestions.length) bubble.appendChild(renderSuggestions(data.suggestions));
 
   wrap.appendChild(bubble);
   chatBox.appendChild(wrap);
   chatBox.scrollTop = chatBox.scrollHeight;
+  return wrap;
+}
+
+function renderDataTable(table) {
+  const wrap = document.createElement("div");
+  wrap.className = "data-table-wrap mt-2";
+  const head = table.columns.map(c => `<th>${c}</th>`).join("");
+  const rows = table.rows.map(r => `<tr>${r.map(v => `<td>${v === null ? "" : v}</td>`).join("")}</tr>`).join("");
+  wrap.innerHTML = `<table class="data-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  return wrap;
+}
+
+function renderSqlToggle(sql) {
+  const id = `sql-${chartCounter++}`;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <span class="sql-toggle-btn" onclick="document.getElementById('${id}').classList.toggle('open')">› Kullanılan SQL</span>
+    <div class="sql-block" id="${id}"></div>
+  `;
+  // XSS'e karşı SQL metnini textContent ile yazıyoruz
+  wrap.querySelector(".sql-block").textContent = sql;
+  return wrap;
+}
+
+function renderChart(chart) {
+  const id = `chart-${chartCounter++}`;
+  const wrap = document.createElement("div");
+  wrap.className = "mt-2";
+  wrap.innerHTML = `<canvas id="${id}" height="180"></canvas>`;
+  requestAnimationFrame(() => {
+    const ctx = document.getElementById(id).getContext("2d");
+    new Chart(ctx, {
+      type: chart.style === "bar" ? "bar" : chart.style,
+      data: {
+        labels: chart.x_labels,
+        datasets: chart.series.map(s => ({ label: s.name, data: s.values })),
+      },
+      options: { responsive: true, plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } } } },
+    });
+  });
+  return wrap;
+}
+
+function renderSuggestions(suggestions) {
+  const wrap = document.createElement("div");
+  wrap.className = "mt-1";
+  suggestions.forEach(s => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "suggestion-chip";
+    chip.textContent = s;
+    chip.onclick = () => sendQuestion(s);
+    wrap.appendChild(chip);
+  });
   return wrap;
 }
 

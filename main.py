@@ -1,18 +1,13 @@
 import os
-import shutil
-import io
-import base64
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
 from embed_and_store import embed_and_store
 from query import ask, collection
+
+from data_loader import load_tabular_file, has_any_table
+from sql_engine import ask_data
 
 app = FastAPI()
 
@@ -25,74 +20,15 @@ app.add_middleware(
 
 MAX_FILE_SIZE_MB = 10
 
-# Yüklenen excel verisini geçici olarak hafızada tutuyoruz
-excel_df = None
-
-# Kullanıcının "grafik yap" gibi bir istekte bulunduğunu anlamak için anahtar kelimeler
-CHART_KEYWORDS = ["grafik", "çizdir", "görselleştir", "chart", "plot", "görsel"]
-
-
-def detect_chart_type(text: str) -> str:
-    text_lower = text.lower()
-    if any(k in text_lower for k in ["pasta", "pie"]):
-        return "pie"
-    if any(k in text_lower for k in ["çizgi", "line", "trend"]):
-        return "line"
-    return "bar"
+# NOT: Eski kod burada `excel_df` (global DataFrame), `CHART_KEYWORDS`, `is_chart_request`,
+# `detect_chart_type`, `generate_chart` (matplotlib) fonksiyonlarını içeriyordu. Bunlar tek bir
+# statik grafik üretiyordu ve gerçek bir sorguya dayanmıyordu. Artık her soruya özel SQL üretilip
+# çalıştırıldığı ve sonuç tablo + grafik + kullanılan SQL olarak döndüğü için bu mantık
+# data_loader.py + sql_engine.py'ye taşındı ve buradan kaldırıldı.
 
 
 class Question(BaseModel):
     question: str
-
-
-def is_chart_request(text: str) -> bool:
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in CHART_KEYWORDS)
-
-
-def generate_chart(df: pd.DataFrame, chart_type: str = "bar") -> str:
-    """Excel verisinden grafik üretir, base64 PNG string döner."""
-    numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    if not numeric_cols:
-        raise ValueError("Excel dosyasında sayısal bir sütun bulunamadı.")
-
-    # İlk sayısal olmayan sütunu etiket (x ekseni) olarak kullan, yoksa satır index'i kullan
-    non_numeric_cols = df.select_dtypes(exclude="number").columns.tolist()
-    labels = df[non_numeric_cols[0]].astype(str) if non_numeric_cols else df.index.astype(str)
-
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-
-    if chart_type == "pie":
-        # Pasta grafik sadece tek sayısal sütunla anlamlı, ilkini kullanıyoruz
-        col = numeric_cols[0]
-        ax.pie(df[col], labels=labels, autopct="%1.1f%%")
-        ax.set_title(f"{col} Dağılımı")
-
-    elif chart_type == "line":
-        x = range(len(df))
-        for col in numeric_cols:
-            ax.plot(x, df[col], marker="o", label=col)
-        ax.set_xticks(list(x))
-        ax.set_xticklabels(labels, rotation=45, ha="right")
-        ax.legend()
-        ax.set_title("Yüklenen Excel Verisi")
-
-    else:  # bar (varsayılan)
-        x = range(len(df))
-        width = 0.8 / len(numeric_cols)
-        for i, col in enumerate(numeric_cols):
-            ax.bar([p + i * width for p in x], df[col], width=width, label=col)
-        ax.set_xticks([p + width * (len(numeric_cols) - 1) / 2 for p in x])
-        ax.set_xticklabels(labels, rotation=45, ha="right")
-        ax.legend()
-        ax.set_title("Yüklenen Excel Verisi")
-
-    fig.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130)
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("utf-8")
 
 
 @app.post("/upload")
@@ -119,6 +55,7 @@ async def upload_pdf(file: UploadFile = File(...)):
     try:
         embed_and_store(file_path)
     except Exception as e:
+        print(f"Hata (upload pdf): {e}")
         os.remove(file_path)
         raise HTTPException(
             status_code=400,
@@ -130,11 +67,17 @@ async def upload_pdf(file: UploadFile = File(...)):
 
 @app.post("/upload-excel")
 async def upload_excel(file: UploadFile = File(...)):
-    global excel_df
+    # Not: Endpoint adı geriye dönük uyumluluk için "upload-excel" olarak kaldı, ama artık
+    # CSV dosyalarını da kabul ediyor. Eski davranıştan farkı: DataFrame'i hafızada tek bir
+    # global değişkende tutup statik bir grafik üretmek yerine, veriyi SQLite'a yazıp şemasını
+    # RAG için embed'liyor — böylece her soruya özel SQL sorgusu üretilip çalıştırılabiliyor.
 
     # 1. Dosya türü kontrolü
-    if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Sadece Excel dosyaları (.xlsx, .xls) kabul edilir.")
+    if not file.filename.lower().endswith((".xlsx", ".xls", ".csv")):
+        raise HTTPException(
+            status_code=400,
+            detail="Sadece Excel (.xlsx, .xls) veya CSV dosyaları kabul edilir.",
+        )
 
     # 2. Boyut kontrolü
     contents = await file.read()
@@ -145,60 +88,73 @@ async def upload_excel(file: UploadFile = File(...)):
             detail=f"Dosya çok büyük ({size_mb:.1f}MB). Maksimum {MAX_FILE_SIZE_MB}MB olmalı.",
         )
 
-    # 3. Pandas ile oku — bozuk dosya burada patlayabilir
+    # 3. Dosyayı diske kaydet (data_loader dosya yolundan okuyor)
+    file_path = f"uploaded_{file.filename}"
+    with open(file_path, "wb") as f:
+        f.write(contents)
+
+    # 4. SQLite'a yaz + şemayı embed'le — bozuk dosya burada patlayabilir
     try:
-        df = pd.read_excel(io.BytesIO(contents))
+        info = load_tabular_file(file_path)
     except Exception as e:
+        print(f"Hata (upload excel): {e}")
+        os.remove(file_path)
         raise HTTPException(
             status_code=400,
-            detail="Excel dosyası okunamadı. Dosya bozuk olabilir, lütfen başka bir dosya deneyin.",
+            detail="Dosya okunamadı. Bozuk olabilir veya desteklenmeyen bir formatta, lütfen başka bir dosya deneyin.",
         )
 
-    # 4. Sayısal veri var mı kontrolü
-    if df.select_dtypes(include="number").empty:
-        raise HTTPException(
-            status_code=400,
-            detail="Bu Excel dosyasında grafik oluşturmak için sayısal bir veri bulunamadı.",
-        )
-
-    excel_df = df
     return {
         "status": "başarılı",
         "dosya": file.filename,
-        "satir_sayisi": len(df),
-        "sutunlar": df.columns.tolist(),
+        "tablo": info["table_name"],
+        "satir_sayisi": info["row_count"],
+        "sutunlar": info["columns"],
     }
 
 
 @app.post("/chat")
 async def chat(q: Question):
-    global excel_df
-
     # 1. Boş soru kontrolü
     question = q.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Soru boş olamaz.")
 
-    # 2. Grafik isteği mi?
-    if is_chart_request(question):
-        if excel_df is None:
-            return {"answer": "Grafik oluşturabilmem için önce bir Excel dosyası yüklemen gerekiyor. 📊"}
+    has_pdf = collection.count() > 0
+    has_data = has_any_table()
+
+    # 2. Hiçbir şey yüklenmemişse
+    if not has_pdf and not has_data:
+        return {
+            "answer": "Merhaba! Henüz bir dosya yüklemediniz. Verilerinizi analiz etmemi "
+                      "istiyorsanız bir Excel/CSV, dokümanlarınızla ilgili soru sormak "
+                      "istiyorsanız bir PDF yükleyebilirsiniz. 📄📊"
+        }
+
+    # 3. Veri tablosu varsa önce Data RAG akışını dene (tablo + grafik + SQL + öneri)
+    if has_data:
         try:
-            chart_type = detect_chart_type(question)
-            chart_base64 = generate_chart(excel_df, chart_type)
-            return {"answer": "İşte yüklediğin veriye ait grafik:", "chart_base64": chart_base64}
+            result = ask_data(question)
         except Exception as e:
-            print(f"Hata (chart): {e}")
-            return {"answer": "Grafik oluşturulurken bir sorun oldu. Excel dosyanı kontrol edip tekrar yükleyebilir misin? 🤔"}
+            print(f"Hata (chat - data): {e}")
+            return {"answer": "Veriniz üzerinde bir sorgu çalıştırırken bir sorun oldu. Sorunuzu farklı bir şekilde sorabilir misiniz? 🤔"}
 
-    # 3. Henüz doküman yüklenmemiş mi?
-    if collection.count() == 0:
-        return {"answer": "Merhaba! Henüz bir doküman yüklemediniz. Lütfen önce yukarıdan bir PDF yükleyin, sonra sorularınızı seve seve yanıtlarım. 📄"}
+        # Data RAG soruyu veriyle ilişkilendiremediyse (sql=None) ve PDF de varsa, doküman RAG'ını dene
+        if result.get("sql") is None and result.get("table") is None and has_pdf:
+            try:
+                answer = ask(question)
+                return {"answer": answer}
+            except Exception as e:
+                print(f"Hata (chat - pdf fallback): {e}")
+                return {"answer": "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"}
 
+        return result
+
+    # 4. Sadece PDF varsa klasik doküman RAG akışı
     try:
         answer = ask(question)
     except Exception as e:
-        print(f"Hata (chat): {e}")
+        print(f"Hata (chat - pdf): {e}")
         return {"answer": "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"}
 
     return {"answer": answer}
