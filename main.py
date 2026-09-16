@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -8,6 +9,7 @@ from query import ask, collection
 
 from data_loader import load_tabular_file, has_any_table
 from sql_engine import ask_data
+import chat_store
 
 app = FastAPI()
 
@@ -29,6 +31,28 @@ MAX_FILE_SIZE_MB = 10
 
 class Question(BaseModel):
     question: str
+    chat_id: Optional[int] = None
+
+
+@app.get("/chats")
+async def get_chats():
+    """Sol menüde gösterilecek sohbet listesi."""
+    return chat_store.list_chats()
+
+
+@app.post("/chats")
+async def create_new_chat():
+    """'Yeni sohbet' butonuna basınca boş bir sohbet oluşturur."""
+    chat_id = chat_store.create_chat()
+    return {"id": chat_id, "title": "Yeni sohbet"}
+
+
+@app.get("/chats/{chat_id}/messages")
+async def get_chat_messages(chat_id: int):
+    """Bir sohbete tıklanınca geçmiş mesajları getirir."""
+    if not chat_store.chat_exists(chat_id):
+        raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
+    return chat_store.get_messages(chat_id)
 
 
 @app.post("/upload")
@@ -120,44 +144,68 @@ async def chat(q: Question):
     if not question:
         raise HTTPException(status_code=400, detail="Soru boş olamaz.")
 
+    # 2. Sohbet id'si yoksa ya da geçersizse yeni bir sohbet oluştur
+    chat_id = q.chat_id
+    if chat_id is None or not chat_store.chat_exists(chat_id):
+        chat_id = chat_store.create_chat()
+
+    chat_store.add_message(chat_id, "user", content=question)
+    chat_store.maybe_set_title_from_first_message(chat_id, question)
+
     has_pdf = collection.count() > 0
     has_data = has_any_table()
 
-    # 2. Hiçbir şey yüklenmemişse
+    # 3. Hiçbir şey yüklenmemişse
     if not has_pdf and not has_data:
-        return {
-            "answer": "Merhaba! Henüz bir dosya yüklemediniz. Verilerinizi analiz etmemi "
-                      "istiyorsanız bir Excel/CSV, dokümanlarınızla ilgili soru sormak "
-                      "istiyorsanız bir PDF yükleyebilirsiniz. 📄📊"
-        }
+        answer = ("Merhaba! Henüz bir dosya yüklemediniz. Verilerinizi analiz etmemi "
+                  "istiyorsanız bir Excel/CSV, dokümanlarınızla ilgili soru sormak "
+                  "istiyorsanız bir PDF yükleyebilirsiniz. 📄📊")
+        chat_store.add_message(chat_id, "assistant", content=answer)
+        return {"answer": answer, "chat_id": chat_id}
 
-    # 3. Veri tablosu varsa önce Data RAG akışını dene (tablo + grafik + SQL + öneri)
+    # 4. Veri tablosu varsa önce Data RAG akışını dene (tablo + grafik + SQL + öneri)
     if has_data:
         try:
             result = ask_data(question)
         except Exception as e:
             print(f"Hata (chat - data): {e}")
-            return {"answer": "Veriniz üzerinde bir sorgu çalıştırırken bir sorun oldu. Sorunuzu farklı bir şekilde sorabilir misiniz? 🤔"}
+            answer = "Veriniz üzerinde bir sorgu çalıştırırken bir sorun oldu. Sorunuzu farklı bir şekilde sorabilir misiniz? 🤔"
+            chat_store.add_message(chat_id, "assistant", content=answer)
+            return {"answer": answer, "chat_id": chat_id}
 
         # Data RAG soruyu veriyle ilişkilendiremediyse (sql=None) ve PDF de varsa, doküman RAG'ını dene
         if result.get("sql") is None and result.get("table") is None and has_pdf:
             try:
                 answer = ask(question)
-                return {"answer": answer}
+                chat_store.add_message(chat_id, "assistant", content=answer)
+                return {"answer": answer, "chat_id": chat_id}
             except Exception as e:
                 print(f"Hata (chat - pdf fallback): {e}")
-                return {"answer": "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"}
+                answer = "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"
+                chat_store.add_message(chat_id, "assistant", content=answer)
+                return {"answer": answer, "chat_id": chat_id}
 
+        chat_store.add_message(
+            chat_id,
+            "assistant",
+            content=result.get("answer"),
+            table=result.get("table"),
+            sql=result.get("sql"),
+            chart=result.get("chart"),
+            suggestions=result.get("suggestions"),
+        )
+        result["chat_id"] = chat_id
         return result
 
-    # 4. Sadece PDF varsa klasik doküman RAG akışı
+    # 5. Sadece PDF varsa klasik doküman RAG akışı
     try:
         answer = ask(question)
     except Exception as e:
         print(f"Hata (chat - pdf): {e}")
-        return {"answer": "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"}
+        answer = "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"
 
-    return {"answer": answer}
+    chat_store.add_message(chat_id, "assistant", content=answer)
+    return {"answer": answer, "chat_id": chat_id}
 
 
 @app.get("/")

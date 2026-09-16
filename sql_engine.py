@@ -131,7 +131,21 @@ SADECE şu JSON formatında cevap ver, başka hiçbir şey yazma:
     return parsed
 
 
-def _infer_chart(df: pd.DataFrame):
+PIE_KEYWORDS = ("pasta", "dağılım", "dagilim", "oran", "yüzde", "yuzde", "pie")
+LINE_KEYWORDS = ("çizgi", "cizgi", "trend", "line", "zaman içinde", "zaman icinde")
+
+
+def detect_chart_style(question: str) -> str:
+    """Soru metnindeki anahtar kelimelere göre tercih edilen grafik tipini döner."""
+    q = question.lower()
+    if any(k in q for k in PIE_KEYWORDS):
+        return "pie"
+    if any(k in q for k in LINE_KEYWORDS):
+        return "line"
+    return "bar"
+
+
+def _infer_chart(df: pd.DataFrame, preferred_style: str = "bar"):
     """Basit sezgisel kural: ilk kolon kategori, sayısal kolon(lar) seri olsun. Uygun değilse None."""
     if df.empty or len(df.columns) < 2:
         return None
@@ -139,8 +153,18 @@ def _infer_chart(df: pd.DataFrame):
     if not numeric_cols:
         return None
     label_col = df.columns[0]
+
+    if preferred_style == "pie":
+        # Pasta grafik tek seri ile anlamlı; ilk sayısal kolonu kullan.
+        col = numeric_cols[0]
+        return {
+            "style": "pie",
+            "x_labels": df[label_col].astype(str).tolist()[:12],
+            "series": [{"name": col, "values": df[col].fillna(0).tolist()[:12]}],
+        }
+
     return {
-        "style": "bar",
+        "style": preferred_style if preferred_style == "line" else "bar",
         "x_labels": df[label_col].astype(str).tolist()[:25],
         "series": [
             {"name": c, "values": df[c].fillna(0).tolist()[:25]} for c in numeric_cols[:4]
@@ -181,6 +205,7 @@ def ask_data(question: str) -> dict:
 
     df = execute_sql(sql)
     summary = summarize_and_suggest(question, sql, df)
+    chart_style = detect_chart_style(question)
 
     return {
         "mode": "data",
@@ -191,7 +216,7 @@ def ask_data(question: str) -> dict:
             "rows": df.astype(object).where(pd.notnull(df), None).values.tolist(),
             "row_count": len(df),
         },
-        "chart": _infer_chart(df),
+        "chart": _infer_chart(df, chart_style),
         "suggestions": summary.get("suggestions", []),
         "used_tables": tables,
     }
