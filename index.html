@@ -34,6 +34,38 @@
   .typing-dots span:nth-child(3) { animation-delay:.4s; }
   @keyframes blink { 0%,80%,100% { opacity:.3; transform:scale(.85); } 40% { opacity:1; transform:scale(1); } }
 
+  /* --- Sol menü (sohbet listesi) --- */
+  .app-shell { display: flex; height: 100dvh; max-width: 1100px; margin: 0 auto; }
+  .sidebar {
+    width: 240px; flex-shrink: 0; background: #f8fafc; border-right: 1px solid #e2e8f0;
+    display: flex; flex-direction: column; padding: 12px; gap: 10px;
+    transition: margin-left .2s ease;
+  }
+  .dark .sidebar { background: #0f172a; border-color: #1e293b; }
+  .sidebar.hidden-mobile { margin-left: -240px; }
+  .new-chat-btn {
+    background: #0f172a; color: #fff; border: none; border-radius: 8px;
+    padding: 9px; font-size: 13px; cursor: pointer;
+  }
+  .dark .new-chat-btn { background: #38bdf8; color: #0f172a; }
+  .chat-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .chat-list-item {
+    font-size: 12.5px; padding: 8px 9px; border-radius: 7px; cursor: pointer;
+    color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dark .chat-list-item { color: #cbd5e1; }
+  .chat-list-item:hover { background: #e2e8f0; }
+  .dark .chat-list-item:hover { background: #1e293b; }
+  .chat-list-item.active { background: #dbeafe; color: #1d4ed8; font-weight: 600; }
+  .dark .chat-list-item.active { background: #0c4a6e; color: #7dd3fc; }
+  .sidebar-empty { font-size: 11.5px; color: #94a3b8; padding: 8px; }
+  .hamburger-btn { display: none; }
+  @media (max-width: 640px) {
+    .hamburger-btn { display: flex; }
+    .sidebar { position: fixed; z-index: 30; left: 0; top: 0; bottom: 0; box-shadow: 2px 0 10px rgba(0,0,0,.15); }
+    .sidebar.hidden-mobile { margin-left: -240px; box-shadow: none; }
+  }
+
   /* --- Data RAG kartları (tablo / sql / grafik / öneriler) --- */
   .data-table-wrap { overflow-x: auto; max-width: 100%; }
   .data-table { border-collapse: collapse; font-size: 12px; width: 100%; }
@@ -62,11 +94,25 @@
 </head>
 <body class="h-full bg-slate-50 dark:bg-slate-900 transition-colors">
 
-<div class="flex flex-col h-[100dvh] max-w-2xl mx-auto bg-white dark:bg-slate-800 shadow-sm transition-colors">
+<div class="app-shell">
+
+  <!-- Sol menü: sohbet listesi -->
+  <aside class="sidebar" id="sidebar">
+    <button class="new-chat-btn" onclick="startNewChat()">+ Yeni sohbet</button>
+    <div class="chat-list" id="chat-list">
+      <div class="sidebar-empty">Henüz sohbet yok.</div>
+    </div>
+  </aside>
+
+<div class="flex flex-col h-[100dvh] flex-1 min-w-0 bg-white dark:bg-slate-800 shadow-sm transition-colors">
 
   <!-- Header -->
   <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
     <div class="flex items-center gap-2">
+      <button id="hamburger-btn" onclick="toggleSidebar()" aria-label="Sohbet listesi"
+        class="hamburger-btn w-8 h-8 items-center justify-center rounded-lg text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">
+        <i class="fa-solid fa-bars text-sm"></i>
+      </button>
       <div class="w-8 h-8 rounded-lg bg-sky-500 flex items-center justify-center text-white">
         <i class="fa-solid fa-file-lines text-sm"></i>
       </div>
@@ -129,9 +175,102 @@
   </div>
 
 </div>
+<!-- /ana sohbet paneli -->
+
+</div>
+<!-- /app-shell -->
 
 <script>
 const API_URL = "https://rag-chatbot-lw84.onrender.com";
+
+// "Şu an hangi sohbetteyiz" bilgisini tutan durum (state) değişkeni.
+// Sayfa ilk açıldığında henüz bir sohbet seçilmediği için null.
+let currentChatId = null;
+
+/* --- Sol menü aç/kapa (mobil) --- */
+function toggleSidebar() {
+  document.getElementById("sidebar").classList.toggle("hidden-mobile");
+}
+function closeSidebarOnMobile() {
+  if (window.innerWidth <= 640) {
+    document.getElementById("sidebar").classList.add("hidden-mobile");
+  }
+}
+// Sayfa mobilde açılıyorsa menü başta kapalı başlasın
+if (window.innerWidth <= 640) {
+  document.getElementById("sidebar").classList.add("hidden-mobile");
+}
+
+/* --- Sohbet listesini backend'den çekip sol menüye basar --- */
+async function loadChatList() {
+  try {
+    const res = await fetch(`${API_URL}/chats`);
+    const chats = await res.json();
+    renderChatList(chats);
+  } catch (err) {
+    console.error("Sohbet listesi alınamadı:", err);
+  }
+}
+
+function renderChatList(chats) {
+  const listEl = document.getElementById("chat-list");
+  listEl.innerHTML = "";
+
+  if (!chats || chats.length === 0) {
+    listEl.innerHTML = `<div class="sidebar-empty">Henüz sohbet yok.</div>`;
+    return;
+  }
+
+  chats.forEach(c => {
+    const item = document.createElement("div");
+    item.className = "chat-list-item" + (c.id === currentChatId ? " active" : "");
+    item.textContent = c.title;
+    item.onclick = () => selectChat(c.id);
+    listEl.appendChild(item);
+  });
+}
+
+/* --- Bir sohbete tıklanınca geçmişini yükler --- */
+async function selectChat(chatId) {
+  currentChatId = chatId;
+  document.getElementById("chat-box").innerHTML = "";
+
+  try {
+    const res = await fetch(`${API_URL}/chats/${chatId}/messages`);
+    const messages = await res.json();
+    messages.forEach(m => {
+      if (m.role === "user") {
+        addMessage(m.content, "user");
+      } else {
+        // chat_store.py'den dönen mesaj şekli (table/sql/chart/suggestions)
+        // addMessage'ın beklediği "data" objesiyle birebir aynı isimlere sahip.
+        addMessage(m.content, "bot", m);
+      }
+    });
+  } catch (err) {
+    console.error("Sohbet geçmişi alınamadı:", err);
+  }
+
+  loadChatList(); // aktif sohbeti menüde vurgulamak için listeyi tazele
+  closeSidebarOnMobile();
+}
+
+/* --- Yeni boş sohbet başlatır --- */
+async function startNewChat() {
+  try {
+    const res = await fetch(`${API_URL}/chats`, { method: "POST" });
+    const data = await res.json();
+    currentChatId = data.id;
+  } catch (err) {
+    currentChatId = null; // olmazsa ilk soruda backend zaten otomatik yeni sohbet açacak
+  }
+  document.getElementById("chat-box").innerHTML = "";
+  loadChatList();
+  closeSidebarOnMobile();
+}
+
+// Sayfa ilk açıldığında sohbet listesini yükle
+loadChatList();
 let chartCounter = 0;
 
 /* --- Tema (light/dark) --- */
@@ -256,7 +395,7 @@ async function sendQuestion(overrideText) {
     const response = await fetch(`${API_URL}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, chat_id: currentChatId }),
     });
     const data = await response.json();
     const elapsed = Date.now() - startTime;
@@ -267,6 +406,11 @@ async function sendQuestion(overrideText) {
     if (!response.ok) {
       addMessage(`Hata: ${data.detail}`, "bot");
       return;
+    }
+    // Backend chat_id'yi döner (ilk soruda otomatik açılan sohbetin id'si budur)
+    if (data.chat_id) {
+      currentChatId = data.chat_id;
+      loadChatList(); // yeni sohbet menüde görünsün / başlık güncellensin
     }
     addMessage(data.answer, "bot", data);
   } catch (err) {
@@ -324,13 +468,20 @@ function renderChart(chart) {
   const wrap = document.createElement("div");
   wrap.className = "mt-2";
   wrap.innerHTML = `<canvas id="${id}" height="180"></canvas>`;
+  const PIE_COLORS = ["#0ea5e9","#f97316","#22c55e","#a855f7","#ef4444","#eab308","#14b8a6","#ec4899","#6366f1","#84cc16","#06b6d4","#f43f5e"];
+
   requestAnimationFrame(() => {
     const ctx = document.getElementById(id).getContext("2d");
+    const isPie = chart.style === "pie";
     new Chart(ctx, {
-      type: chart.style === "bar" ? "bar" : chart.style,
+      type: isPie ? "pie" : chart.style,
       data: {
         labels: chart.x_labels,
-        datasets: chart.series.map(s => ({ label: s.name, data: s.values })),
+        datasets: chart.series.map(s => ({
+          label: s.name,
+          data: s.values,
+          backgroundColor: isPie ? PIE_COLORS.slice(0, s.values.length) : undefined,
+        })),
       },
       options: { responsive: true, plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } } } },
     });
