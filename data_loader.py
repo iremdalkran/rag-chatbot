@@ -77,6 +77,31 @@ Kolonlar:
     return doc
 
 
+def clear_all_data() -> None:
+    """
+    Önceki tüm yüklenmiş tabloları (SQLite) ve şema kayıtlarını (Chroma) temizler.
+
+    Neden gerekli: Kullanıcı art arda birden fazla dosya yüklerse, eskisi silinmeden yenisi
+    eklenince sistemde birden fazla tablo birikiyordu. Soru sorulduğunda retrieval (hangi
+    tabloya bakılacağını bulma adımı) bazen yanlış/eski tabloyu seçip "ilişkilendiremedim"
+    gibi hatalı cevaplar üretebiliyordu. Bunu önlemek için her yeni dosya yüklemesinden önce
+    önceki veriyi tamamen temizleyip TEK bir aktif veri setiyle çalışıyoruz.
+    """
+    # 1) SQLite'taki tüm tabloları sil
+    conn = sqlite3.connect(DB_PATH)
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    for (name,) in tables:
+        conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+    conn.commit()
+    conn.close()
+
+    # 2) Chroma'daki şema kayıtlarını sil (koleksiyonun kendisini silmiyoruz, sadece içeriğini —
+    #    böylece main.py/sql_engine.py'nin elindeki `schema_collection` referansı bozulmuyor)
+    existing_ids = schema_collection.get()["ids"]
+    if existing_ids:
+        schema_collection.delete(ids=existing_ids)
+
+
 def load_tabular_file(file_path: str, table_name: Optional[str] = None) -> dict:
     """
     CSV/Excel dosyasını okur, SQLite'a yazar, şema dokümanını embed'leyip Chroma'ya kaydeder.
@@ -86,6 +111,9 @@ def load_tabular_file(file_path: str, table_name: Optional[str] = None) -> dict:
     df = _read_any_table(file_path)
     if df.empty:
         raise ValueError("Dosya boş görünüyor.")
+
+    # Yeni dosya yüklenmeden önce eski veri setini tamamen temizle (tek aktif veri seti mantığı)
+    clear_all_data()
 
     if table_name is None:
         table_name = _slugify_table_name(file_path)
