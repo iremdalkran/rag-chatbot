@@ -64,7 +64,14 @@ Kurallar:
 1. Sadece aşağıda şeması verilen tablo(lar)ı ve kolonları kullan. Şemada olmayan tablo/kolon UYDURMA.
 2. Sorgu SADECE SELECT ile başlamalı. INSERT/UPDATE/DELETE/DROP/ALTER/PRAGMA gibi ifadeler YASAK.
 3. Cevabında SADECE SQL sorgusunu döndür. Açıklama, markdown, kod bloğu işareti (```), yorum yazma.
-4. Soru veriyle ilgili değilse veya cevaplanamıyorsa tek satırda şunu yaz: NO_QUERY
+4. Soru "grafik yap", "pasta grafik yap", "görselleştir", "çizdir" gibi SPESİFİK bir kritere
+   (hangi kolon/ürün/metrik olduğu) değinmeyen genel bir görselleştirme isteğiyse: NO_QUERY DEME.
+   Bunun yerine, tablodaki en anlamlı kategori kolonunu ve ilk 1-2 sayısal kolonu seçip
+   (örn. `SELECT urun, ciro_2026 FROM tablo ORDER BY ciro_2026 DESC LIMIT 15` gibi) makul bir
+   özet sorgusu üret. Tabloda hangi kolonlar varsa onları kullan, "ciro" özel bir örnektir,
+   şemada böyle bir kolon yoksa kullanma.
+5. Soru gerçekten veriyle hiçbir şekilde ilişkilendirilemiyorsa (örn. veriyle alakasız bir konu
+   soruluyorsa) tek satırda şunu yaz: NO_QUERY
 
 Tablo şeması / bağlam:
 {schema_context}"""
@@ -174,7 +181,16 @@ def _infer_chart(df: pd.DataFrame, preferred_style: str = "bar"):
 
 def ask_data(question: str) -> dict:
     """Tüm Data RAG akışını uçtan uca çalıştırır ve arayüzün ihtiyacı olan JSON'u döner."""
-    docs, tables = retrieve_schema_context(question)
+    print(f"[DEBUG] ask_data çağrıldı, soru: {question!r}")
+
+    try:
+        docs, tables = retrieve_schema_context(question)
+    except Exception as e:
+        print(f"[DEBUG] retrieve_schema_context HATASI: {type(e).__name__}: {e}")
+        raise
+
+    print(f"[DEBUG] Bulunan tablo(lar): {tables}")
+
     if not docs:
         return {
             "mode": "data",
@@ -188,6 +204,9 @@ def ask_data(question: str) -> dict:
     schema_context = "\n\n---\n\n".join(docs)
 
     sql = generate_sql(question, schema_context)
+    print(f"[DEBUG] Soru: {question!r}")
+    print(f"[DEBUG] Üretilen SQL: {sql!r}")
+
     try:
         _validate_sql(sql)
     except SQLEngineError as e:
@@ -201,9 +220,16 @@ def ask_data(question: str) -> dict:
                 "chart": None,
                 "suggestions": [],
             }
+        print(f"[DEBUG] Güvenlik doğrulaması reddetti: {e}")
         raise
 
-    df = execute_sql(sql)
+    try:
+        df = execute_sql(sql)
+    except Exception as e:
+        print(f"[DEBUG] SQL ÇALIŞTIRMA HATASI: {e}")
+        print(f"[DEBUG] Hatalı SQL: {sql}")
+        raise
+
     summary = summarize_and_suggest(question, sql, df)
     chart_style = detect_chart_style(question)
 

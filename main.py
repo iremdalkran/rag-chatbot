@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+import traceback
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -169,6 +170,7 @@ async def chat(q: Question):
             result = ask_data(question)
         except Exception as e:
             print(f"Hata (chat - data): {e}")
+            traceback.print_exc()
             answer = "Veriniz üzerinde bir sorgu çalıştırırken bir sorun oldu. Sorunuzu farklı bir şekilde sorabilir misiniz? 🤔"
             chat_store.add_message(chat_id, "assistant", content=answer)
             return {"answer": answer, "chat_id": chat_id}
