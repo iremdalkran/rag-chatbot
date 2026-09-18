@@ -123,6 +123,7 @@ async def upload_excel(file: UploadFile = File(...)):
         info = load_tabular_file(file_path)
     except Exception as e:
         print(f"Hata (upload excel): {e}")
+        traceback.print_exc()
         os.remove(file_path)
         raise HTTPException(
             status_code=400,

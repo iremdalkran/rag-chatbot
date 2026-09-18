@@ -90,6 +90,7 @@ def clear_all_data() -> None:
     # 1) SQLite'taki tüm tabloları sil
     conn = sqlite3.connect(DB_PATH)
     tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    print(f"[DEBUG] clear_all_data: silinecek SQLite tabloları: {tables}")
     for (name,) in tables:
         conn.execute(f'DROP TABLE IF EXISTS "{name}"')
     conn.commit()
@@ -98,6 +99,7 @@ def clear_all_data() -> None:
     # 2) Chroma'daki şema kayıtlarını sil (koleksiyonun kendisini silmiyoruz, sadece içeriğini —
     #    böylece main.py/sql_engine.py'nin elindeki `schema_collection` referansı bozulmuyor)
     existing_ids = schema_collection.get()["ids"]
+    print(f"[DEBUG] clear_all_data: silinecek Chroma id'leri: {existing_ids}")
     if existing_ids:
         schema_collection.delete(ids=existing_ids)
 
@@ -112,8 +114,11 @@ def load_tabular_file(file_path: str, table_name: Optional[str] = None) -> dict:
     if df.empty:
         raise ValueError("Dosya boş görünüyor.")
 
+    print(f"[DEBUG] load_tabular_file: {file_path} okundu, {len(df)} satır, kolonlar: {list(df.columns)}")
+
     # Yeni dosya yüklenmeden önce eski veri setini tamamen temizle (tek aktif veri seti mantığı)
     clear_all_data()
+    print("[DEBUG] load_tabular_file: clear_all_data tamamlandı")
 
     if table_name is None:
         table_name = _slugify_table_name(file_path)
