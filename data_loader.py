@@ -1,18 +1,19 @@
 """
 data_loader.py
 ----------------
-"Data RAG" katmanının ingestion (yükleme) kısmı.
+Basitleştirilmiş "Data RAG" ingestion katmanı.
 
-Mevcut projede embed_and_store.py PDF metnini parça parça (chunk) embed'leyip
-Chroma'ya "dokuman_chunklari" koleksiyonuna yazıyordu. Bu modül aynı RAG mantığını
-tablo verisine uyguluyor:
+ÖNEMLİ DEĞİŞİKLİK (önceki sürüme göre): Sistem artık her zaman TEK bir aktif veri seti ile
+çalışıyor (yeni dosya yüklenince öncekini siliyor — bkz. clear_all_data). Bu sayede "hangi
+tabloya bakmalıyım" sorusunu embedding/vektör arama (Chroma + Voyage) ile bulmaya hiç gerek
+kalmadı: tek tablo olduğu için doğrudan SQLite şemasını okuyup Claude'a veriyoruz.
 
-  - CSV/Excel dosyası okunur, bir SQLite tablosuna yazılır (gerçek sorgular buradan çalışır).
-  - Tablonun ŞEMASI (kolon adları/tipleri) + birkaç örnek satır, insan-okunur bir metne
-    dönüştürülüp Voyage ile embed'lenir ve Chroma'da "veri_semalari" koleksiyonuna yazılır.
+Bunun iki faydası var:
+  1. Kod basitleşti — Chroma/embedding karmaşıklığı tamamen kalktı.
+  2. Voyage AI'ya (embedding servisi) giden istek sayısı azaldı — rate limit sorununu hafifletir.
 
-Böylece bir soru geldiğinde, hangi tablo/kolonların o soruyla alakalı olduğu retrieval ile
-bulunabilir (tıpkı PDF chunk'larında olduğu gibi), sonra bu bağlam SQL üretimi için kullanılır.
+PDF tarafı (query.py / embed_and_store.py) hâlâ Voyage ile embedding kullanıyor, bu dosyaya
+dokunmadık — sadece Excel/CSV (veri) tarafını basitleştirdik.
 """
 
 import os
@@ -21,20 +22,8 @@ import sqlite3
 from typing import Optional
 
 import pandas as pd
-import voyageai
-import chromadb
-
-from dotenv import load_dotenv
-
-load_dotenv()
 
 DB_PATH = "./data.db"
-CHROMA_PATH = "./chroma_db"
-SCHEMA_COLLECTION_NAME = "veri_semalari"
-
-voyage_client = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
-chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
-schema_collection = chroma_client.get_or_create_collection(name=SCHEMA_COLLECTION_NAME)
 
 
 def _slugify_table_name(filename: str) -> str:
@@ -55,58 +44,22 @@ def _read_any_table(file_path: str) -> pd.DataFrame:
         raise ValueError("Desteklenmeyen dosya türü. Sadece .csv, .xlsx, .xls kabul edilir.")
 
 
-def _schema_document(table_name: str, df: pd.DataFrame) -> str:
-    """Retrieval'da kullanılacak insan-okunur şema açıklaması üretir."""
-    columns_desc = []
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        sample_vals = df[col].dropna().unique()[:3]
-        sample_str = ", ".join(str(v) for v in sample_vals)
-        columns_desc.append(f"  - {col} ({dtype}) — örnek değerler: {sample_str}")
-
-    sample_rows = df.head(3).to_string(index=False)
-
-    doc = f"""Tablo adı: {table_name}
-Satır sayısı: {len(df)}
-Kolonlar:
-{chr(10).join(columns_desc)}
-
-Örnek satırlar:
-{sample_rows}
-"""
-    return doc
-
-
 def clear_all_data() -> None:
     """
-    Önceki tüm yüklenmiş tabloları (SQLite) ve şema kayıtlarını (Chroma) temizler.
-
-    Neden gerekli: Kullanıcı art arda birden fazla dosya yüklerse, eskisi silinmeden yenisi
-    eklenince sistemde birden fazla tablo birikiyordu. Soru sorulduğunda retrieval (hangi
-    tabloya bakılacağını bulma adımı) bazen yanlış/eski tabloyu seçip "ilişkilendiremedim"
-    gibi hatalı cevaplar üretebiliyordu. Bunu önlemek için her yeni dosya yüklemesinden önce
-    önceki veriyi tamamen temizleyip TEK bir aktif veri setiyle çalışıyoruz.
+    Önceki tüm yüklenmiş tabloları siler (tek aktif veri seti mantığı).
+    Yeni bir dosya yüklenmeden hemen önce çağrılır.
     """
-    # 1) SQLite'taki tüm tabloları sil
     conn = sqlite3.connect(DB_PATH)
     tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    print(f"[DEBUG] clear_all_data: silinecek SQLite tabloları: {tables}")
     for (name,) in tables:
         conn.execute(f'DROP TABLE IF EXISTS "{name}"')
     conn.commit()
     conn.close()
 
-    # 2) Chroma'daki şema kayıtlarını sil (koleksiyonun kendisini silmiyoruz, sadece içeriğini —
-    #    böylece main.py/sql_engine.py'nin elindeki `schema_collection` referansı bozulmuyor)
-    existing_ids = schema_collection.get()["ids"]
-    print(f"[DEBUG] clear_all_data: silinecek Chroma id'leri: {existing_ids}")
-    if existing_ids:
-        schema_collection.delete(ids=existing_ids)
-
 
 def load_tabular_file(file_path: str, table_name: Optional[str] = None) -> dict:
     """
-    CSV/Excel dosyasını okur, SQLite'a yazar, şema dokümanını embed'leyip Chroma'ya kaydeder.
+    CSV/Excel dosyasını okur, önceki veriyi temizler, yeni veriyi SQLite'a yazar.
 
     Returns: {"table_name": ..., "row_count": ..., "columns": [...]}
     """
@@ -114,11 +67,7 @@ def load_tabular_file(file_path: str, table_name: Optional[str] = None) -> dict:
     if df.empty:
         raise ValueError("Dosya boş görünüyor.")
 
-    print(f"[DEBUG] load_tabular_file: {file_path} okundu, {len(df)} satır, kolonlar: {list(df.columns)}")
-
-    # Yeni dosya yüklenmeden önce eski veri setini tamamen temizle (tek aktif veri seti mantığı)
     clear_all_data()
-    print("[DEBUG] load_tabular_file: clear_all_data tamamlandı")
 
     if table_name is None:
         table_name = _slugify_table_name(file_path)
@@ -126,30 +75,59 @@ def load_tabular_file(file_path: str, table_name: Optional[str] = None) -> dict:
     # Kolon adlarını da SQL-dostu hale getir
     df.columns = [re.sub(r"[^a-zA-Z0-9_]", "_", str(c)).strip("_").lower() for c in df.columns]
 
-    # 1) SQLite'a yaz (gerçek sorgular burada çalışacak)
     conn = sqlite3.connect(DB_PATH)
     df.to_sql(table_name, conn, if_exists="replace", index=False)
     conn.close()
-
-    # 2) Şema dokümanını embed'le ve Chroma'ya kaydet (retrieval için)
-    schema_doc = _schema_document(table_name, df)
-    embedding = voyage_client.embed([schema_doc], model="voyage-3.5", input_type="document").embeddings[0]
-
-    # Aynı tablo tekrar yüklenirse eski kaydı temizle
-    try:
-        schema_collection.delete(ids=[table_name])
-    except Exception:
-        pass
-
-    schema_collection.add(
-        ids=[table_name],
-        embeddings=[embedding],
-        documents=[schema_doc],
-        metadatas=[{"table_name": table_name, "row_count": len(df)}],
-    )
 
     return {"table_name": table_name, "row_count": len(df), "columns": list(df.columns)}
 
 
 def has_any_table() -> bool:
-    return schema_collection.count() > 0
+    conn = sqlite3.connect(DB_PATH)
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    conn.close()
+    return len(tables) > 0
+
+
+def get_active_schema_context() -> Optional[str]:
+    """
+    Şu an aktif olan (tek) tablonun şema açıklamasını döner. sql_engine.py bunu doğrudan
+    Claude'a bağlam olarak veriyor — embedding/vektör aramaya artık gerek yok.
+
+    Tablo yoksa None döner.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    if not tables:
+        conn.close()
+        return None
+
+    table_name = tables[0][0]
+    df_sample = pd.read_sql_query(f'SELECT * FROM "{table_name}" LIMIT 3', conn)
+    row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+    conn.close()
+
+    columns_desc = []
+    for col in df_sample.columns:
+        dtype = str(df_sample[col].dtype)
+        sample_vals = df_sample[col].dropna().unique()[:3]
+        sample_str = ", ".join(str(v) for v in sample_vals)
+        columns_desc.append(f"  - {col} ({dtype}) — örnek değerler: {sample_str}")
+
+    sample_rows = df_sample.to_string(index=False)
+
+    return f"""Tablo adı: {table_name}
+Satır sayısı: {row_count}
+Kolonlar:
+{chr(10).join(columns_desc)}
+
+Örnek satırlar:
+{sample_rows}
+"""
+
+
+def get_active_table_name() -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    conn.close()
+    return tables[0][0] if tables else None

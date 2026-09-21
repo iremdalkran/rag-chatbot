@@ -1,14 +1,13 @@
 """
 sql_engine.py
 -------------
-"Data RAG" akışının çekirdeği. query.py'deki PDF-RAG akışıyla birebir aynı iskeleti izler:
+Basitleştirilmiş Data akışı (artık "retrieval" adımı embedding değil, doğrudan SQLite şema
+okuma — bkz. data_loader.get_active_schema_context). Akış:
 
-    1. RETRIEVE : soru embed edilir, Chroma'daki "veri_semalari" koleksiyonunda en alakalı
-                   tablo şema(ları) bulunur.
-    2. AUGMENT  : bulunan şema + örnek satırlar, Claude'a bağlam olarak verilir.
-    3. GENERATE : Claude sadece bu bağlama dayanarak bir SQL (SELECT) sorgusu üretir.
-    4. EXECUTE  : sorgu güvenlik kontrolünden geçirilip SQLite üzerinde çalıştırılır.
-    5. ANSWER   : sonuç tablosu + soru, Claude'a tekrar verilir; kısa bir doğal dil cevabı ve
+    1. ŞEMA     : data_loader'dan aktif tablonun şema açıklaması alınır (embedding YOK).
+    2. GENERATE : Claude bu şemaya dayanarak bir SQL (SELECT) sorgusu üretir.
+    3. EXECUTE  : sorgu güvenlik kontrolünden geçirilip SQLite üzerinde çalıştırılır.
+    4. ANSWER   : sonuç tablosu + soru, Claude'a tekrar verilir; kısa bir doğal dil cevabı ve
                   3 takip sorusu önerisi üretilir.
 
 Sonuç, index.html'in tablo + grafik + "Kullanılan SQL" + öneri çipleri olarak göstereceği
@@ -21,15 +20,13 @@ import json
 import sqlite3
 
 import pandas as pd
-import voyageai
 import anthropic
 
 from dotenv import load_dotenv
-from data_loader import schema_collection, DB_PATH
+from data_loader import DB_PATH, get_active_schema_context, get_active_table_name
 
 load_dotenv()
 
-voyage_client = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
 anthropic_client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 FORBIDDEN_KEYWORDS = re.compile(
@@ -37,41 +34,38 @@ FORBIDDEN_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+PIE_KEYWORDS = ("pasta", "dağılım", "dagilim", "oran", "yüzde", "yuzde", "pie")
+LINE_KEYWORDS = ("çizgi", "cizgi", "trend", "line", "zaman içinde", "zaman icinde")
+
 
 class SQLEngineError(Exception):
     pass
 
 
-def retrieve_schema_context(question: str, top_k: int = 3):
-    """1) RETRIEVE — soruyla en alakalı tablo şemalarını Chroma'dan bulur."""
-    result = voyage_client.embed([question], model="voyage-3.5", input_type="query")
-    question_embedding = result.embeddings[0]
-
-    n = min(top_k, max(schema_collection.count(), 1))
-    results = schema_collection.query(query_embeddings=[question_embedding], n_results=n)
-
-    docs = results["documents"][0] if results["documents"] else []
-    tables = [m["table_name"] for m in results["metadatas"][0]] if results["metadatas"] else []
-    return docs, tables
+def detect_chart_style(question: str) -> str:
+    """Soru metnindeki anahtar kelimelere göre tercih edilen grafik tipini döner."""
+    q = question.lower()
+    if any(k in q for k in PIE_KEYWORDS):
+        return "pie"
+    if any(k in q for k in LINE_KEYWORDS):
+        return "line"
+    return "bar"
 
 
 def generate_sql(question: str, schema_context: str) -> str:
-    """2+3) AUGMENT + GENERATE — Claude'dan sadece bağlamdaki tablolara dair güvenli bir SELECT sorgusu ister."""
+    """Claude'dan, aktif tablonun şemasına dayanan güvenli bir SELECT sorgusu ister."""
     system_prompt = f"""Sen bir metinden-SQL asistanısın. Sadece SQLite için geçerli, SADECE SELECT
 içeren tek bir sorgu üretirsin.
 
 Kurallar:
-1. Sadece aşağıda şeması verilen tablo(lar)ı ve kolonları kullan. Şemada olmayan tablo/kolon UYDURMA.
+1. Sadece aşağıda şeması verilen tabloyu ve kolonları kullan. Şemada olmayan tablo/kolon UYDURMA.
 2. Sorgu SADECE SELECT ile başlamalı. INSERT/UPDATE/DELETE/DROP/ALTER/PRAGMA gibi ifadeler YASAK.
 3. Cevabında SADECE SQL sorgusunu döndür. Açıklama, markdown, kod bloğu işareti (```), yorum yazma.
 4. Soru "grafik yap", "pasta grafik yap", "görselleştir", "çizdir" gibi SPESİFİK bir kritere
    (hangi kolon/ürün/metrik olduğu) değinmeyen genel bir görselleştirme isteğiyse: NO_QUERY DEME.
-   Bunun yerine, tablodaki en anlamlı kategori kolonunu ve ilk 1-2 sayısal kolonu seçip
-   (örn. `SELECT urun, ciro_2026 FROM tablo ORDER BY ciro_2026 DESC LIMIT 15` gibi) makul bir
-   özet sorgusu üret. Tabloda hangi kolonlar varsa onları kullan, "ciro" özel bir örnektir,
-   şemada böyle bir kolon yoksa kullanma.
-5. Soru gerçekten veriyle hiçbir şekilde ilişkilendirilemiyorsa (örn. veriyle alakasız bir konu
-   soruluyorsa) tek satırda şunu yaz: NO_QUERY
+   Bunun yerine, tablodaki en anlamlı kategori kolonunu ve ilk 1-2 sayısal kolonu seçip makul
+   bir özet sorgusu üret. Tabloda hangi kolonlar varsa onları kullan.
+5. Soru gerçekten veriyle hiçbir şekilde ilişkilendirilemiyorsa tek satırda şunu yaz: NO_QUERY
 
 Tablo şeması / bağlam:
 {schema_context}"""
@@ -99,7 +93,7 @@ def _validate_sql(sql: str) -> None:
 
 
 def execute_sql(sql: str) -> pd.DataFrame:
-    """4) EXECUTE — doğrulanan sorguyu SQLite üzerinde çalıştırır."""
+    """Doğrulanan sorguyu SQLite üzerinde çalıştırır."""
     _validate_sql(sql)
     conn = sqlite3.connect(DB_PATH)
     try:
@@ -110,7 +104,7 @@ def execute_sql(sql: str) -> pd.DataFrame:
 
 
 def summarize_and_suggest(question: str, sql: str, df: pd.DataFrame) -> dict:
-    """5) ANSWER — sonuç tablosuna bakarak kısa bir cevap + 3 takip sorusu önerisi üretir."""
+    """Sonuç tablosuna bakarak kısa bir cevap + 3 takip sorusu önerisi üretir."""
     preview = df.head(10).to_csv(index=False)
     system_prompt = """Sen bir veri analistisin. Sana bir soru, çalıştırılan SQL sorgusu ve
 sonuç tablosunun bir önizlemesi verilecek. Görevin:
@@ -138,20 +132,6 @@ SADECE şu JSON formatında cevap ver, başka hiçbir şey yazma:
     return parsed
 
 
-PIE_KEYWORDS = ("pasta", "dağılım", "dagilim", "oran", "yüzde", "yuzde", "pie")
-LINE_KEYWORDS = ("çizgi", "cizgi", "trend", "line", "zaman içinde", "zaman icinde")
-
-
-def detect_chart_style(question: str) -> str:
-    """Soru metnindeki anahtar kelimelere göre tercih edilen grafik tipini döner."""
-    q = question.lower()
-    if any(k in q for k in PIE_KEYWORDS):
-        return "pie"
-    if any(k in q for k in LINE_KEYWORDS):
-        return "line"
-    return "bar"
-
-
 def _infer_chart(df: pd.DataFrame, preferred_style: str = "bar"):
     """Basit sezgisel kural: ilk kolon kategori, sayısal kolon(lar) seri olsun. Uygun değilse None."""
     if df.empty or len(df.columns) < 2:
@@ -162,7 +142,6 @@ def _infer_chart(df: pd.DataFrame, preferred_style: str = "bar"):
     label_col = df.columns[0]
 
     if preferred_style == "pie":
-        # Pasta grafik tek seri ile anlamlı; ilk sayısal kolonu kullan.
         col = numeric_cols[0]
         return {
             "style": "pie",
@@ -180,18 +159,11 @@ def _infer_chart(df: pd.DataFrame, preferred_style: str = "bar"):
 
 
 def ask_data(question: str) -> dict:
-    """Tüm Data RAG akışını uçtan uca çalıştırır ve arayüzün ihtiyacı olan JSON'u döner."""
+    """Tüm Data akışını uçtan uca çalıştırır ve arayüzün ihtiyacı olan JSON'u döner."""
     print(f"[DEBUG] ask_data çağrıldı, soru: {question!r}")
 
-    try:
-        docs, tables = retrieve_schema_context(question)
-    except Exception as e:
-        print(f"[DEBUG] retrieve_schema_context HATASI: {type(e).__name__}: {e}")
-        raise
-
-    print(f"[DEBUG] Bulunan tablo(lar): {tables}")
-
-    if not docs:
+    schema_context = get_active_schema_context()
+    if schema_context is None:
         return {
             "mode": "data",
             "answer": "Henüz analiz edebileceğim bir veri tablosu yok. Lütfen önce bir CSV/Excel dosyası yükleyin.",
@@ -201,10 +173,7 @@ def ask_data(question: str) -> dict:
             "suggestions": [],
         }
 
-    schema_context = "\n\n---\n\n".join(docs)
-
     sql = generate_sql(question, schema_context)
-    print(f"[DEBUG] Soru: {question!r}")
     print(f"[DEBUG] Üretilen SQL: {sql!r}")
 
     try:
@@ -214,7 +183,7 @@ def ask_data(question: str) -> dict:
             return {
                 "mode": "data",
                 "answer": "Bu soruyu mevcut verilerle ilişkilendiremedim. Elimdeki tablolarla "
-                          "ilgili (satış, ciro, adet vb.) bir soru sorabilir misiniz?",
+                          "ilgili bir soru sorabilir misiniz?",
                 "sql": None,
                 "table": None,
                 "chart": None,
@@ -244,5 +213,5 @@ def ask_data(question: str) -> dict:
         },
         "chart": _infer_chart(df, chart_style),
         "suggestions": summary.get("suggestions", []),
-        "used_tables": tables,
+        "used_table": get_active_table_name(),
     }
