@@ -8,3 +8,4 @@ chromadb
 pypdf
 pandas
 openpyxl
+psycopg2-binary

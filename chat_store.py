@@ -1,56 +1,70 @@
 """
 chat_store.py
 -------------
-Sol menüdeki sohbet listesi ve her sohbetin mesaj geçmişini saklayan modül.
+Sol menüdeki sohbet listesini ve mesaj geçmişini KALICI olarak saklayan modül.
 
-Ayrı bir SQLite dosyası (chats.db) kullanıyor — data.db (yüklenen Excel/CSV tabloları) ile
-karışmasın diye. İki tablo var:
+ÖNEMLİ DEĞİŞİKLİK: Önceki sürüm yerel bir SQLite dosyası (chats.db) kullanıyordu — Render'da
+her deploy'da bu dosya siliniyordu. Şimdi Supabase'in ücretsiz barındırdığı bir PostgreSQL
+veritabanına bağlanıyoruz; bu veritabanı Render'dan tamamen bağımsız olduğu için deploy'lar
+arasında hiç silinmiyor, kalıcı.
 
+Bağlantı bilgisi DATABASE_URL ortam değişkeninden okunuyor:
+  - Yerelde: .env dosyasına DATABASE_URL=postgresql://... satırını eklemeniz gerekiyor.
+  - Render'da: Environment sekmesinden aynı adla eklemeniz gerekiyor.
+
+İki tablo var:
   chats(id, title, created_at)
   messages(id, chat_id, role, content, table_json, sql, chart_json, suggestions_json, created_at)
-
-role: "user" ya da "assistant"
-table_json / chart_json / suggestions_json: JSON string olarak saklanır (None olabilir).
 """
 
-import sqlite3
+import os
 import json
 from datetime import datetime, timezone
 from typing import Optional
 
-CHATS_DB_PATH = "./chats.db"
+import psycopg2
+import psycopg2.extras
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 def _connect():
-    conn = sqlite3.connect(CHATS_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL ortam değişkeni tanımlı değil. .env dosyanıza (yerelde) ve "
+            "Render > Environment sekmesine (canlıda) Supabase bağlantı adresini eklemeniz gerekiyor."
+        )
+    return psycopg2.connect(DATABASE_URL)
 
 
 def init_db():
     conn = _connect()
-    conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS chats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             title TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
     """)
-    conn.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER NOT NULL,
+            id SERIAL PRIMARY KEY,
+            chat_id INTEGER NOT NULL REFERENCES chats(id),
             role TEXT NOT NULL,
             content TEXT,
             table_json TEXT,
             sql TEXT,
             chart_json TEXT,
             suggestions_json TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (chat_id) REFERENCES chats(id)
+            created_at TEXT NOT NULL
         )
     """)
     conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -65,26 +79,34 @@ def _make_title(question: str) -> str:
 
 def create_chat(title: Optional[str] = None) -> int:
     conn = _connect()
-    cur = conn.execute(
-        "INSERT INTO chats (title, created_at) VALUES (?, ?)",
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO chats (title, created_at) VALUES (%s, %s) RETURNING id",
         (title or "Yeni sohbet", _now()),
     )
+    chat_id = cur.fetchone()[0]
     conn.commit()
-    chat_id = cur.lastrowid
+    cur.close()
     conn.close()
     return chat_id
 
 
 def list_chats() -> list:
     conn = _connect()
-    rows = conn.execute("SELECT id, title, created_at FROM chats ORDER BY id DESC").fetchall()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT id, title, created_at FROM chats ORDER BY id DESC")
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return [dict(r) for r in rows]
 
 
 def chat_exists(chat_id: int) -> bool:
     conn = _connect()
-    row = conn.execute("SELECT id FROM chats WHERE id = ?", (chat_id,)).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM chats WHERE id = %s", (chat_id,))
+    row = cur.fetchone()
+    cur.close()
     conn.close()
     return row is not None
 
@@ -92,10 +114,13 @@ def chat_exists(chat_id: int) -> bool:
 def maybe_set_title_from_first_message(chat_id: int, question: str):
     """Sohbetin ilk kullanıcı mesajından otomatik başlık üretir (hâlâ 'Yeni sohbet' ise)."""
     conn = _connect()
-    row = conn.execute("SELECT title FROM chats WHERE id = ?", (chat_id,)).fetchone()
-    if row and row["title"] == "Yeni sohbet":
-        conn.execute("UPDATE chats SET title = ? WHERE id = ?", (_make_title(question), chat_id))
+    cur = conn.cursor()
+    cur.execute("SELECT title FROM chats WHERE id = %s", (chat_id,))
+    row = cur.fetchone()
+    if row and row[0] == "Yeni sohbet":
+        cur.execute("UPDATE chats SET title = %s WHERE id = %s", (_make_title(question), chat_id))
         conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -109,10 +134,11 @@ def add_message(
     suggestions: Optional[list] = None,
 ):
     conn = _connect()
-    conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         """INSERT INTO messages
            (chat_id, role, content, table_json, sql, chart_json, suggestions_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
         (
             chat_id,
             role,
@@ -125,14 +151,16 @@ def add_message(
         ),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def get_messages(chat_id: int) -> list:
     conn = _connect()
-    rows = conn.execute(
-        "SELECT * FROM messages WHERE chat_id = ? ORDER BY id ASC", (chat_id,)
-    ).fetchall()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT * FROM messages WHERE chat_id = %s ORDER BY id ASC", (chat_id,))
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
 
     result = []
