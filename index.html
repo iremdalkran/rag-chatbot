@@ -17,48 +17,53 @@
   html { scroll-behavior: smooth; }
   body { font-family: system-ui, -apple-system, sans-serif; }
   #chat-box::-webkit-scrollbar { width: 6px; }
-  #chat-box::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-  .dark #chat-box::-webkit-scrollbar-thumb { background: #475569; }
+  #chat-box::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 999px; }
+  .dark #chat-box::-webkit-scrollbar-thumb { background: #52525b; }
   .spinner {
     display:inline-block; width:14px; height:14px;
-    border:2px solid rgba(148,163,184,.4); border-top-color:#0ea5e9;
+    border:2px solid rgba(161,161,170,.4); border-top-color:#7c3aed;
     border-radius:50%; animation:spin .7s linear infinite; margin-right:6px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   .typing-dots { display:inline-flex; gap:4px; padding:12px 16px; }
   .typing-dots span {
     width:7px; height:7px; border-radius:50%;
-    background:#94a3b8; animation:blink 1.4s infinite; animation-fill-mode:both;
+    background:#a1a1aa; animation:blink 1.4s infinite; animation-fill-mode:both;
   }
   .typing-dots span:nth-child(2) { animation-delay:.2s; }
   .typing-dots span:nth-child(3) { animation-delay:.4s; }
   @keyframes blink { 0%,80%,100% { opacity:.3; transform:scale(.85); } 40% { opacity:1; transform:scale(1); } }
 
   /* --- Sol menü (sohbet listesi) --- */
-  .app-shell { display: flex; height: 100dvh; max-width: 1100px; margin: 0 auto; }
+  .app-shell { display: flex; height: 100dvh; max-width: 1360px; margin: 0 auto; }
   .sidebar {
-    width: 240px; flex-shrink: 0; background: #f8fafc; border-right: 1px solid #e2e8f0;
+    width: 240px; flex-shrink: 0; background: #fafafa; border-right: 1px solid #e4e4e7;
     display: flex; flex-direction: column; padding: 12px; gap: 10px;
     transition: margin-left .2s ease;
   }
-  .dark .sidebar { background: #0f172a; border-color: #1e293b; }
+  .dark .sidebar { background: #18181b; border-color: #27272a; }
   .sidebar.hidden-mobile { margin-left: -240px; }
   .new-chat-btn {
-    background: #0f172a; color: #fff; border: none; border-radius: 8px;
+    background: #18181b; color: #fff; border: none; border-radius: 8px;
     padding: 9px; font-size: 13px; cursor: pointer;
   }
-  .dark .new-chat-btn { background: #38bdf8; color: #0f172a; }
+  .dark .new-chat-btn { background: #a78bfa; color: #18181b; }
   .chat-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
   .chat-list-item {
     font-size: 12.5px; padding: 8px 9px; border-radius: 7px; cursor: pointer;
-    color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: #3f3f46; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .dark .chat-list-item { color: #cbd5e1; }
-  .chat-list-item:hover { background: #e2e8f0; }
-  .dark .chat-list-item:hover { background: #1e293b; }
-  .chat-list-item.active { background: #dbeafe; color: #1d4ed8; font-weight: 600; }
-  .dark .chat-list-item.active { background: #0c4a6e; color: #7dd3fc; }
-  .sidebar-empty { font-size: 11.5px; color: #94a3b8; padding: 8px; }
+  .dark .chat-list-item { color: #d4d4d8; }
+  .chat-list-item:hover { background: #e4e4e7; }
+  .dark .chat-list-item:hover { background: #27272a; }
+  .chat-list-item.active {
+    background: #ede9fe; color: #6d28d9; font-weight: 600;
+    border-left: 3px solid #7c3aed; padding-left: 6px;
+  }
+  .dark .chat-list-item.active {
+    background: #4c1d95; color: #c4b5fd; border-left: 3px solid #a78bfa; padding-left: 6px;
+  }
+  .sidebar-empty { font-size: 11.5px; color: #a1a1aa; padding: 8px; }
   .hamburger-btn { display: none; }
   @media (max-width: 640px) {
     .hamburger-btn { display: flex; }
@@ -68,31 +73,54 @@
 
   /* --- Data RAG kartları (tablo / sql / grafik / öneriler) --- */
   .data-table-wrap { overflow-x: auto; max-width: 100%; }
+  .result-card {
+    border: 1px solid rgba(161,161,170,.35); border-radius: 12px; padding: 12px 14px;
+    background: rgba(255,255,255,.5); box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .dark .result-card { background: rgba(15,23,42,.35); border-color: rgba(161,161,170,.2); }
   .data-table { border-collapse: collapse; font-size: 12px; width: 100%; }
   .data-table th, .data-table td {
     padding: 5px 8px; text-align: left; white-space: nowrap;
-    border-bottom: 1px solid rgba(148,163,184,.35);
+    border-bottom: 1px solid rgba(161,161,170,.35);
   }
-  .data-table th { font-weight: 600; color: #64748b; }
-  .dark .data-table th { color: #94a3b8; }
+  .data-table th { font-weight: 600; color: #71717a; }
+  .dark .data-table th { color: #a1a1aa; }
   .sql-toggle-btn {
-    font-size: 11px; color: #0ea5e9; cursor: pointer; margin-top: 6px; display:inline-block;
+    font-size: 11px; color: #7c3aed; cursor: pointer; margin-top: 6px; display:inline-block;
   }
   .sql-block {
-    display: none; background: #0f172a; color: #cbd5e1; font-family: ui-monospace, monospace;
+    display: none; background: #18181b; color: #d4d4d8; font-family: ui-monospace, monospace;
     font-size: 11px; padding: 8px 10px; border-radius: 8px; margin-top: 6px; white-space: pre-wrap;
   }
   .sql-block.open { display: block; }
   .suggestion-chip {
-    display: block; width: 100%; text-align: left; font-size: 12px;
-    background: rgba(255,255,255,.6); border: 1px solid rgba(148,163,184,.4);
-    border-radius: 8px; padding: 6px 10px; margin-top: 6px; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; text-align: left; font-size: 12.5px;
+    background: rgba(255,255,255,.6); border: 1px solid rgba(161,161,170,.35);
+    border-radius: 9px; padding: 9px 12px; margin-top: 6px; cursor: pointer;
+    transition: background .12s ease, border-color .12s ease;
   }
-  .dark .suggestion-chip { background: rgba(15,23,42,.4); }
-  .suggestion-chip:hover { background: rgba(14,165,233,.12); }
+  .dark .suggestion-chip { background: rgba(15,23,42,.4); border-color: rgba(161,161,170,.2); }
+  .suggestion-chip:hover { background: rgba(124,58,237,.12); border-color: #a78bfa; }
+  .suggestion-chip .arrow { color: #a1a1aa; font-size: 13px; margin-left: 10px; flex-shrink: 0; }
+
+  /* --- Kart araç çubuğu (Panoya sabitle / CSV / PNG) --- */
+  .card-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 6px; margin-bottom: 2px;
+  }
+  .card-toolbar-title { font-size: 11px; color: #a1a1aa; font-weight: 600; }
+  .card-toolbar-actions { display: flex; gap: 4px; }
+  .card-btn {
+    font-size: 10.5px; color: #52525b; background: rgba(161,161,170,.15);
+    border: none; border-radius: 6px; padding: 3px 7px; cursor: pointer;
+  }
+  .dark .card-btn { color: #d4d4d8; background: rgba(161,161,170,.2); }
+  .card-btn:hover { background: rgba(124,58,237,.2); color: #6d28d9; }
+  .card-btn.copied { background: #22c55e; color: #fff; }
 </style>
 </head>
-<body class="h-full bg-slate-50 dark:bg-slate-900 transition-colors">
+<body class="h-full bg-zinc-50 dark:bg-zinc-900 transition-colors">
 
 <div class="app-shell">
 
@@ -104,49 +132,49 @@
     </div>
   </aside>
 
-<div class="flex flex-col h-[100dvh] flex-1 min-w-0 bg-white dark:bg-slate-800 shadow-sm transition-colors">
+<div class="flex flex-col h-[100dvh] flex-1 min-w-0 bg-white dark:bg-zinc-800 shadow-sm transition-colors">
 
   <!-- Header -->
-  <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+  <header class="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
     <div class="flex items-center gap-2">
       <button id="hamburger-btn" onclick="toggleSidebar()" aria-label="Sohbet listesi"
-        class="hamburger-btn w-8 h-8 items-center justify-center rounded-lg text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">
+        class="hamburger-btn w-8 h-8 items-center justify-center rounded-lg text-zinc-500 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">
         <i class="fa-solid fa-bars text-sm"></i>
       </button>
-      <div class="w-8 h-8 rounded-lg bg-sky-500 flex items-center justify-center text-white">
+      <div class="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center text-white">
         <i class="fa-solid fa-file-lines text-sm"></i>
       </div>
-      <h1 class="font-semibold text-slate-800 dark:text-slate-100 text-sm sm:text-base">Doküman Chatbot</h1>
+      <h1 class="font-semibold text-zinc-800 dark:text-zinc-100 text-sm sm:text-base">Doküman Chatbot</h1>
     </div>
     <button id="theme-toggle" aria-label="Tema değiştir"
-      class="w-9 h-9 flex items-center justify-center rounded-full text-slate-500 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">
+      class="w-9 h-9 flex items-center justify-center rounded-full text-zinc-500 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">
       <i class="fa-solid fa-moon dark:hidden"></i>
       <i class="fa-solid fa-sun hidden dark:inline"></i>
     </button>
   </header>
 
   <!-- Upload bar: PDF -->
-  <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+  <div class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
     <div class="flex flex-col sm:flex-row gap-2">
       <label for="pdf-input"
-        class="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-500 dark:text-slate-300 cursor-pointer truncate">
+        class="flex-1 flex items-center gap-2 border border-zinc-300 dark:border-zinc-600 rounded-lg px-3 py-2 text-sm text-zinc-500 dark:text-zinc-300 cursor-pointer truncate">
         <i class="fa-solid fa-file-pdf flex-shrink-0"></i>
         <span id="file-label-text" class="truncate">PDF seç...</span>
       </label>
       <input type="file" id="pdf-input" accept=".pdf" class="hidden">
       <button id="upload-btn" onclick="uploadPdf()"
-        class="bg-sky-500 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+        class="bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
         Dokümanı Yükle
       </button>
     </div>
-    <p id="upload-status" class="flex items-center mt-2 text-xs text-slate-500 dark:text-slate-400 min-h-[1em]"></p>
+    <p id="upload-status" class="flex items-center mt-2 text-xs text-zinc-500 dark:text-zinc-400 min-h-[1em]"></p>
   </div>
 
   <!-- Upload bar: Excel / CSV -->
-  <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
+  <div class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
     <div class="flex flex-col sm:flex-row gap-2">
       <label for="excel-input"
-        class="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-500 dark:text-slate-300 cursor-pointer truncate">
+        class="flex-1 flex items-center gap-2 border border-zinc-300 dark:border-zinc-600 rounded-lg px-3 py-2 text-sm text-zinc-500 dark:text-zinc-300 cursor-pointer truncate">
         <i class="fa-solid fa-file-excel flex-shrink-0"></i>
         <span id="excel-label-text" class="truncate">Excel/CSV seç...</span>
       </label>
@@ -156,19 +184,19 @@
         Veri Yükle
       </button>
     </div>
-    <p id="excel-status" class="flex items-center mt-2 text-xs text-slate-500 dark:text-slate-400 min-h-[1em]"></p>
+    <p id="excel-status" class="flex items-center mt-2 text-xs text-zinc-500 dark:text-zinc-400 min-h-[1em]"></p>
   </div>
 
   <!-- Messages -->
   <div id="chat-box" class="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3"></div>
 
   <!-- Composer -->
-  <div class="border-t border-slate-200 dark:border-slate-700 p-3 flex-shrink-0" style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));">
-    <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 rounded-full pl-4 pr-1.5 py-1.5">
+  <div class="border-t border-zinc-200 dark:border-zinc-700 p-3 flex-shrink-0" style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));">
+    <div class="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-700 rounded-full pl-4 pr-1.5 py-1.5">
       <input type="text" id="question-input" placeholder="Bir soru sor..."
-        class="flex-1 bg-transparent outline-none text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 min-w-0">
+        class="flex-1 bg-transparent outline-none text-sm text-zinc-800 dark:text-zinc-100 placeholder-zinc-400 min-w-0">
       <button id="send-btn" onclick="sendQuestion()" aria-label="Gönder"
-        class="w-9 h-9 flex-shrink-0 rounded-full bg-sky-500 hover:bg-sky-600 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors">
+        class="w-9 h-9 flex-shrink-0 rounded-full bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors">
         <i class="fa-solid fa-paper-plane text-xs"></i>
       </button>
     </div>
@@ -427,8 +455,8 @@ function addMessage(text, who, data) {
   wrap.className = who === "user" ? "flex justify-end" : "flex justify-start";
   const bubble = document.createElement("div");
   bubble.className = who === "user"
-    ? "max-w-[85%] bg-sky-500 text-white text-sm rounded-2xl rounded-br-md px-4 py-2.5 whitespace-pre-wrap break-words"
-    : "max-w-[90%] bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm rounded-2xl rounded-bl-md px-4 py-2.5 whitespace-pre-wrap break-words";
+    ? "max-w-[85%] bg-violet-600 text-white text-sm rounded-2xl rounded-br-md px-4 py-2.5 whitespace-pre-wrap break-words"
+    : "max-w-[95%] lg:max-w-[80%] bg-zinc-100 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 text-sm rounded-2xl rounded-bl-md px-4 py-2.5 whitespace-pre-wrap break-words";
   bubble.textContent = text;
 
   if (data && data.table) bubble.appendChild(renderDataTable(data.table));
@@ -444,11 +472,73 @@ function addMessage(text, who, data) {
 
 function renderDataTable(table) {
   const wrap = document.createElement("div");
-  wrap.className = "data-table-wrap mt-2";
+  wrap.className = "data-table-wrap result-card mt-2";
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "card-toolbar";
+  toolbar.innerHTML = `
+    <span class="card-toolbar-title">📋 Sorgu Sonucu (${table.row_count} satır)</span>
+    <span class="card-toolbar-actions">
+      <button class="card-btn" data-action="copy">Panoya sabitle</button>
+      <button class="card-btn" data-action="csv">CSV</button>
+    </span>
+  `;
+  toolbar.querySelector('[data-action="copy"]').onclick = (e) => copyTableToClipboard(table, e.target);
+  toolbar.querySelector('[data-action="csv"]').onclick = () => downloadTableCSV(table);
+  wrap.appendChild(toolbar);
+
   const head = table.columns.map(c => `<th>${c}</th>`).join("");
   const rows = table.rows.map(r => `<tr>${r.map(v => `<td>${v === null ? "" : v}</td>`).join("")}</tr>`).join("");
-  wrap.innerHTML = `<table class="data-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  const tableEl = document.createElement("div");
+  tableEl.innerHTML = `<table class="data-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.appendChild(tableEl);
+
   return wrap;
+}
+
+/* --- Tabloyu Excel'e yapıştırılabilir (TSV) formatta panoya kopyalar --- */
+function tableToTSV(table) {
+  const header = table.columns.join("\t");
+  const rows = table.rows.map(r => r.map(v => v === null ? "" : v).join("\t"));
+  return [header, ...rows].join("\n");
+}
+
+async function copyTableToClipboard(table, btn) {
+  try {
+    await navigator.clipboard.writeText(tableToTSV(table));
+    flashButton(btn, "Kopyalandı ✓");
+  } catch (err) {
+    flashButton(btn, "Kopyalanamadı");
+  }
+}
+
+/* --- Tabloyu .csv dosyası olarak indirir --- */
+function downloadTableCSV(table) {
+  const header = table.columns.join(",");
+  const rows = table.rows.map(r =>
+    r.map(v => {
+      if (v === null) return "";
+      const s = String(v);
+      // İçinde virgül/tırnak/satır sonu varsa CSV kuralına göre tırnak içine al
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    }).join(",")
+  );
+  const csv = [header, ...rows].join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }); // \uFEFF: Excel'de Türkçe karakterler bozulmasın diye
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "sorgu_sonucu.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function flashButton(btn, text) {
+  if (!btn) return;
+  const original = btn.textContent;
+  btn.textContent = text;
+  btn.classList.add("copied");
+  setTimeout(() => { btn.textContent = original; btn.classList.remove("copied"); }, 1500);
 }
 
 function renderSqlToggle(sql) {
@@ -463,17 +553,38 @@ function renderSqlToggle(sql) {
   return wrap;
 }
 
+// Her canvas id'sine karşılık gelen Chart.js örneğini burada tutuyoruz —
+// PNG indirirken/kopyalarken hangi grafiğin görselini alacağımızı bilmemiz lazım.
+const chartInstances = {};
+
 function renderChart(chart) {
   const id = `chart-${chartCounter++}`;
   const wrap = document.createElement("div");
-  wrap.className = "mt-2";
-  wrap.innerHTML = `<canvas id="${id}" height="180"></canvas>`;
-  const PIE_COLORS = ["#0ea5e9","#f97316","#22c55e","#a855f7","#ef4444","#eab308","#14b8a6","#ec4899","#6366f1","#84cc16","#06b6d4","#f43f5e"];
+  wrap.className = "result-card mt-2";
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "card-toolbar";
+  toolbar.innerHTML = `
+    <span class="card-toolbar-title">📊 Grafik</span>
+    <span class="card-toolbar-actions">
+      <button class="card-btn" data-action="copy">Panoya sabitle</button>
+      <button class="card-btn" data-action="png">PNG</button>
+    </span>
+  `;
+  toolbar.querySelector('[data-action="copy"]').onclick = (e) => copyChartToClipboard(id, e.target);
+  toolbar.querySelector('[data-action="png"]').onclick = () => downloadChartPNG(id);
+  wrap.appendChild(toolbar);
+
+  const canvasWrap = document.createElement("div");
+  canvasWrap.innerHTML = `<canvas id="${id}" height="180"></canvas>`;
+  wrap.appendChild(canvasWrap);
+
+  const PIE_COLORS = ["#7c3aed","#f97316","#22c55e","#a855f7","#ef4444","#eab308","#14b8a6","#ec4899","#6366f1","#84cc16","#06b6d4","#f43f5e"];
 
   requestAnimationFrame(() => {
     const ctx = document.getElementById(id).getContext("2d");
     const isPie = chart.style === "pie";
-    new Chart(ctx, {
+    chartInstances[id] = new Chart(ctx, {
       type: isPie ? "pie" : chart.style,
       data: {
         labels: chart.x_labels,
@@ -489,6 +600,31 @@ function renderChart(chart) {
   return wrap;
 }
 
+/* --- Grafiği .png dosyası olarak indirir --- */
+function downloadChartPNG(chartId) {
+  const chartObj = chartInstances[chartId];
+  if (!chartObj) return;
+  const a = document.createElement("a");
+  a.href = chartObj.toBase64Image("image/png", 1);
+  a.download = "grafik.png";
+  a.click();
+}
+
+/* --- Grafiği görsel olarak panoya kopyalar (Excel/Word'e yapıştırılabilir) --- */
+async function copyChartToClipboard(chartId, btn) {
+  const chartObj = chartInstances[chartId];
+  if (!chartObj) return;
+  try {
+    const canvas = chartObj.canvas;
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    flashButton(btn, "Kopyalandı ✓");
+  } catch (err) {
+    // Bazı tarayıcılar (özellikle file:// üzerinden açılan sayfalarda) görsel kopyalamaya izin vermez
+    flashButton(btn, "Kopyalanamadı");
+  }
+}
+
 function renderSuggestions(suggestions) {
   const wrap = document.createElement("div");
   wrap.className = "mt-1";
@@ -496,7 +632,15 @@ function renderSuggestions(suggestions) {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "suggestion-chip";
-    chip.textContent = s;
+
+    const label = document.createElement("span");
+    label.textContent = s;
+    const arrow = document.createElement("span");
+    arrow.className = "arrow";
+    arrow.textContent = "→";
+
+    chip.appendChild(label);
+    chip.appendChild(arrow);
     chip.onclick = () => sendQuestion(s);
     wrap.appendChild(chip);
   });
@@ -507,7 +651,7 @@ function addTypingIndicator() {
   const chatBox = document.getElementById("chat-box");
   const wrap = document.createElement("div");
   wrap.className = "flex justify-start";
-  wrap.innerHTML = `<div class="typing-dots bg-slate-100 dark:bg-slate-700 rounded-2xl rounded-bl-md"><span></span><span></span><span></span></div>`;
+  wrap.innerHTML = `<div class="typing-dots bg-zinc-100 dark:bg-zinc-700 rounded-2xl rounded-bl-md"><span></span><span></span><span></span></div>`;
   chatBox.appendChild(wrap);
   chatBox.scrollTop = chatBox.scrollHeight;
   return wrap;
