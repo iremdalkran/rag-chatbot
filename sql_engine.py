@@ -133,13 +133,32 @@ SADECE şu JSON formatında cevap ver, başka hiçbir şey yazma:
 
 
 def _infer_chart(df: pd.DataFrame, preferred_style: str = "bar"):
-    """Basit sezgisel kural: ilk kolon kategori, sayısal kolon(lar) seri olsun. Uygun değilse None."""
+    """
+    Grafik için hangi kolonun kategori (etiket), hangilerinin sayısal seri olacağını belirler.
+
+    ÖNEMLİ: Kolon SIRASINA değil, kolon TİPİNE bakıyoruz (önceki sürüm "ilk kolon her zaman
+    etiket" varsayıyordu — Claude'un ürettiği SQL kolonları farklı sırada döndürürse bu
+    varsayım yanlış çıkıp hiç grafik üretilememesine yol açabiliyordu).
+    """
     if df.empty or len(df.columns) < 2:
         return None
-    numeric_cols = [c for c in df.columns[1:] if pd.api.types.is_numeric_dtype(df[c])]
+
+    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
+    non_numeric_cols = [c for c in df.columns if c not in numeric_cols]
+
     if not numeric_cols:
         return None
-    label_col = df.columns[0]
+
+    # Etiket (x ekseni) için sayısal olmayan ilk kolonu kullan; hiç yoksa (tüm kolonlar
+    # sayısalsa) ilk sayısal kolonu hem etiket hem seri gibi kullanmak yerine, ikinci sayısal
+    # kolonu seri yapıp ilkini etiket olarak kullanırız.
+    if non_numeric_cols:
+        label_col = non_numeric_cols[0]
+    else:
+        label_col = numeric_cols[0]
+        numeric_cols = numeric_cols[1:]
+        if not numeric_cols:
+            return None
 
     if preferred_style == "pie":
         col = numeric_cols[0]
@@ -201,6 +220,10 @@ def ask_data(question: str) -> dict:
 
     summary = summarize_and_suggest(question, sql, df)
     chart_style = detect_chart_style(question)
+    chart = _infer_chart(df, chart_style)
+
+    if chart is None:
+        print(f"[DEBUG] Grafik üretilemedi. Kolonlar/tipler: {dict(df.dtypes.astype(str))}")
 
     return {
         "mode": "data",
@@ -211,7 +234,7 @@ def ask_data(question: str) -> dict:
             "rows": df.astype(object).where(pd.notnull(df), None).values.tolist(),
             "row_count": len(df),
         },
-        "chart": _infer_chart(df, chart_style),
+        "chart": chart,
         "suggestions": summary.get("suggestions", []),
         "used_table": get_active_table_name(),
     }
