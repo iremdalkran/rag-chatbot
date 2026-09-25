@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 import traceback
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ from query import ask, collection
 from data_loader import load_tabular_file, has_any_table
 from sql_engine import ask_data
 import chat_store
+import auth
 
 app = FastAPI()
 
@@ -22,6 +23,24 @@ app.add_middleware(
 )
 
 MAX_FILE_SIZE_MB = 10
+
+
+def _friendly_error_message(e: Exception, default: str) -> str:
+    """
+    Bir hatanın 'rate limit' (Voyage/Anthropic'in dakikadaki istek sınırı) kaynaklı olup
+    olmadığını anlar. Öyleyse kullanıcıya bunu doğru şekilde açıklayan bir mesaj döner,
+    değilse çağıranın verdiği genel (default) mesajı döner.
+
+    Neden gerekli: Rate limit hatası "dosya bozuk" ya da "sorgu hatası" gibi görünmemeli —
+    kullanıcının yapması gereken şey dosyayı değiştirmek değil, birazcık beklemek.
+    """
+    text = str(e).lower()
+    rate_limit_signals = ("rate limit", "rate_limit", "429", "reduced rate limits", "too many requests")
+    if any(signal in text for signal in rate_limit_signals):
+        return ("Sistem şu an çok fazla istek aldığı için geçici bir hız sınırına (rate limit) "
+                "takıldı. Bu bir dosya/soru hatası değil — lütfen birkaç saniye bekleyip tekrar "
+                "deneyin. ⏳")
+    return default
 
 # NOT: Eski kod burada `excel_df` (global DataFrame), `CHART_KEYWORDS`, `is_chart_request`,
 # `detect_chart_type`, `generate_chart` (matplotlib) fonksiyonlarını içeriyordu. Bunlar tek bir
@@ -35,21 +54,44 @@ class Question(BaseModel):
     chat_id: Optional[int] = None
 
 
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.post("/login")
+async def login(body: LoginRequest):
+    """Paylaşılan şifreyi kontrol eder, doğruysa bir oturum token'ı döner."""
+    if not auth.check_password(body.password):
+        raise HTTPException(status_code=401, detail="Şifre yanlış.")
+    token = auth.create_session()
+    return {"token": token}
+
+
+async def require_auth(x_auth_token: Optional[str] = Header(default=None)):
+    """
+    Korumalı endpoint'lerin önüne konan bağımlılık (dependency). Geçerli bir X-Auth-Token
+    header'ı yoksa isteği 401 ile reddeder. FastAPI'de bir endpoint'e Depends(require_auth)
+    eklemek, o endpoint çalışmadan ÖNCE bu fonksiyonun çalışmasını ve geçmesini şart koşar.
+    """
+    if not auth.is_valid_session(x_auth_token):
+        raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor.")
+
+
 @app.get("/chats")
-async def get_chats():
+async def get_chats(_: None = Depends(require_auth)):
     """Sol menüde gösterilecek sohbet listesi."""
     return chat_store.list_chats()
 
 
 @app.post("/chats")
-async def create_new_chat():
+async def create_new_chat(_: None = Depends(require_auth)):
     """'Yeni sohbet' butonuna basınca boş bir sohbet oluşturur."""
     chat_id = chat_store.create_chat()
     return {"id": chat_id, "title": "Yeni sohbet"}
 
 
 @app.get("/chats/{chat_id}/messages")
-async def get_chat_messages(chat_id: int):
+async def get_chat_messages(chat_id: int, _: None = Depends(require_auth)):
     """Bir sohbete tıklanınca geçmiş mesajları getirir."""
     if not chat_store.chat_exists(chat_id):
         raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
@@ -57,7 +99,7 @@ async def get_chat_messages(chat_id: int):
 
 
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(file: UploadFile = File(...), _: None = Depends(require_auth)):
     # 1. Dosya türü kontrolü
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sadece PDF dosyaları kabul edilir.")
@@ -84,14 +126,16 @@ async def upload_pdf(file: UploadFile = File(...)):
         os.remove(file_path)
         raise HTTPException(
             status_code=400,
-            detail="PDF okunamadı. Dosya bozuk olabilir, lütfen başka bir dosya deneyin.",
+            detail=_friendly_error_message(
+                e, "PDF okunamadı. Dosya bozuk olabilir, lütfen başka bir dosya deneyin."
+            ),
         )
 
     return {"status": "başarılı", "dosya": file.filename}
 
 
 @app.post("/upload-excel")
-async def upload_excel(file: UploadFile = File(...)):
+async def upload_excel(file: UploadFile = File(...), _: None = Depends(require_auth)):
     # Not: Endpoint adı geriye dönük uyumluluk için "upload-excel" olarak kaldı, ama artık
     # CSV dosyalarını da kabul ediyor. Eski davranıştan farkı: DataFrame'i hafızada tek bir
     # global değişkende tutup statik bir grafik üretmek yerine, veriyi SQLite'a yazıp şemasını
@@ -127,7 +171,10 @@ async def upload_excel(file: UploadFile = File(...)):
         os.remove(file_path)
         raise HTTPException(
             status_code=400,
-            detail="Dosya okunamadı. Bozuk olabilir veya desteklenmeyen bir formatta, lütfen başka bir dosya deneyin.",
+            detail=_friendly_error_message(
+                e,
+                "Dosya okunamadı. Bozuk olabilir veya desteklenmeyen bir formatta, lütfen başka bir dosya deneyin.",
+            ),
         )
 
     return {
@@ -140,7 +187,7 @@ async def upload_excel(file: UploadFile = File(...)):
 
 
 @app.post("/chat")
-async def chat(q: Question):
+async def chat(q: Question, _: None = Depends(require_auth)):
     # 1. Boş soru kontrolü
     question = q.question.strip()
     if not question:
@@ -172,7 +219,9 @@ async def chat(q: Question):
         except Exception as e:
             print(f"Hata (chat - data): {e}")
             traceback.print_exc()
-            answer = "Veriniz üzerinde bir sorgu çalıştırırken bir sorun oldu. Sorunuzu farklı bir şekilde sorabilir misiniz? 🤔"
+            answer = _friendly_error_message(
+                e, "Veriniz üzerinde bir sorgu çalıştırırken bir sorun oldu. Sorunuzu farklı bir şekilde sorabilir misiniz? 🤔"
+            )
             chat_store.add_message(chat_id, "assistant", content=answer)
             return {"answer": answer, "chat_id": chat_id}
 
@@ -184,7 +233,9 @@ async def chat(q: Question):
                 return {"answer": answer, "chat_id": chat_id}
             except Exception as e:
                 print(f"Hata (chat - pdf fallback): {e}")
-                answer = "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"
+                answer = _friendly_error_message(
+                    e, "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"
+                )
                 chat_store.add_message(chat_id, "assistant", content=answer)
                 return {"answer": answer, "chat_id": chat_id}
 
@@ -205,7 +256,9 @@ async def chat(q: Question):
         answer = ask(question)
     except Exception as e:
         print(f"Hata (chat - pdf): {e}")
-        answer = "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"
+        answer = _friendly_error_message(
+            e, "Bu sorunun cevabını yüklediğiniz dokümanda bulamadım. Sorunuzu farklı bir şekilde sorabilir ya da başka bir soru deneyebilirsiniz. 🤔"
+        )
 
     chat_store.add_message(chat_id, "assistant", content=answer)
     return {"answer": answer, "chat_id": chat_id}
