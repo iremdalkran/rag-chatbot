@@ -64,6 +64,28 @@
     background: #4c1d95; color: #c4b5fd; border-left: 3px solid #a78bfa; padding-left: 6px;
   }
   .sidebar-empty { font-size: 11.5px; color: #a1a1aa; padding: 8px; }
+
+  /* --- Sol alt profil etiketi --- */
+  .sidebar-profile {
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px; border-top: 1px solid #e4e4e7; margin-top: 4px;
+  }
+  .dark .sidebar-profile { border-color: #27272a; }
+  .sidebar-profile-avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    background: #7c3aed; color: #fff; font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sidebar-profile-text { min-width: 0; }
+  .sidebar-profile-name {
+    font-size: 12.5px; font-weight: 600; color: #27272a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dark .sidebar-profile-name { color: #f4f4f5; }
+  .sidebar-profile-email {
+    font-size: 11px; color: #a1a1aa;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .hamburger-btn { display: none; }
   @media (max-width: 640px) {
     .hamburger-btn { display: flex; }
@@ -106,21 +128,41 @@
 
   /* --- Kart araç çubuğu (Panoya sabitle / CSV / PNG) --- */
   .card-toolbar {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;
     margin-top: 6px; margin-bottom: 2px;
   }
   .card-toolbar-title { font-size: 11px; color: #a1a1aa; font-weight: 600; }
-  .card-toolbar-actions { display: flex; gap: 4px; }
+  .card-toolbar-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .card-btn {
     font-size: 10.5px; color: #52525b; background: rgba(161,161,170,.15);
     border: none; border-radius: 6px; padding: 3px 7px; cursor: pointer;
   }
   .dark .card-btn { color: #d4d4d8; background: rgba(161,161,170,.2); }
   .card-btn:hover { background: rgba(124,58,237,.2); color: #6d28d9; }
-  .card-btn.copied { background: #22c55e; color: #fff; }
+  .card-btn.copied { background: #7c3aed; color: #fff; }
 </style>
 </head>
 <body class="h-full bg-zinc-50 dark:bg-zinc-900 transition-colors">
+
+<!-- Giriş ekranı: doğru şifre girilene kadar her şeyin üstünü kaplar -->
+<div id="login-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-50 dark:bg-zinc-900 px-4">
+  <form id="login-form" class="w-full max-w-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-sm p-6 flex flex-col gap-4">
+    <div class="flex items-center gap-2 justify-center">
+      <div class="w-9 h-9 rounded-lg bg-violet-600 flex items-center justify-center text-white">
+        <i class="fa-solid fa-file-lines text-sm"></i>
+      </div>
+      <h1 class="font-semibold text-zinc-800 dark:text-zinc-100 text-base">Doküman Chatbot</h1>
+    </div>
+    <p class="text-xs text-zinc-500 dark:text-zinc-400 text-center">Devam etmek için şifreyi girin.</p>
+    <input type="password" id="login-password" placeholder="Şifre"
+      class="w-full border border-zinc-300 dark:border-zinc-600 bg-transparent rounded-lg px-3 py-2.5 text-sm text-zinc-800 dark:text-zinc-100 outline-none focus:border-violet-500">
+    <button type="submit"
+      class="w-full bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-colors">
+      Giriş yap
+    </button>
+    <p id="login-error" class="text-xs text-red-500 text-center min-h-[1em]"></p>
+  </form>
+</div>
 
 <div class="app-shell">
 
@@ -130,6 +172,16 @@
     <div class="chat-list" id="chat-list">
       <div class="sidebar-empty">Henüz sohbet yok.</div>
     </div>
+
+    <!-- Profil etiketi — bu tek kullanıcılı sistemde sabit yazılı, gerçek bir hesap sistemi değil.
+         Adınızı/e-postanızı değiştirmek isterseniz aşağıdaki iki satırı düzenlemeniz yeterli. -->
+    <div class="sidebar-profile">
+      <div class="sidebar-profile-avatar">İ</div>
+      <div class="sidebar-profile-text">
+        <div class="sidebar-profile-name">İrem</div>
+        <div class="sidebar-profile-email">irem@example.com</div>
+      </div>
+    </div>
   </aside>
 
 <div class="flex flex-col h-[100dvh] flex-1 min-w-0 bg-white dark:bg-zinc-800 shadow-sm transition-colors">
@@ -138,10 +190,10 @@
   <header class="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
     <div class="flex items-center gap-2">
       <button id="hamburger-btn" onclick="toggleSidebar()" aria-label="Sohbet listesi"
-        class="hamburger-btn w-8 h-8 items-center justify-center rounded-lg text-zinc-500 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700">
-        <i class="fa-solid fa-bars text-sm"></i>
+        class="hamburger-btn w-8 h-8 items-center justify-center rounded-lg border border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-600">
+        <i class="fa-solid fa-bars text-xs"></i>
       </button>
-      <div class="w-8 h-8 rounded-lg bg-violet-600 flex items-center justify-center text-white">
+      <div class="hidden sm:flex w-8 h-8 rounded-lg bg-violet-600 items-center justify-center text-white">
         <i class="fa-solid fa-file-lines text-sm"></i>
       </div>
       <h1 class="font-semibold text-zinc-800 dark:text-zinc-100 text-sm sm:text-base">Doküman Chatbot</h1>
@@ -211,6 +263,75 @@
 <script>
 const API_URL = "https://rag-chatbot-lw84.onrender.com";
 
+// Oturum token'ı — localStorage'da saklanıyor ki sayfa yenilenince tekrar şifre sormasın.
+let authToken = localStorage.getItem("authToken");
+
+/* --- Her korumalı isteğe eklenecek header'ı üretir --- */
+function authHeaders() {
+  return authToken ? { "X-Auth-Token": authToken } : {};
+}
+
+/* --- Bir fetch cevabı 401 (yetkisiz) dönerse: token'ı temizle, giriş ekranına dön --- */
+function handleUnauthorized(response) {
+  if (response.status === 401) {
+    authToken = null;
+    localStorage.removeItem("authToken");
+    showLogin();
+    return true;
+  }
+  return false;
+}
+
+function showLogin() {
+  document.getElementById("login-overlay").classList.remove("hidden");
+}
+function hideLogin() {
+  document.getElementById("login-overlay").classList.add("hidden");
+}
+
+document.getElementById("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const passwordInput = document.getElementById("login-password");
+  const errorEl = document.getElementById("login-error");
+  const submitBtn = e.target.querySelector("button[type=submit]");
+
+  errorEl.textContent = "";
+  submitBtn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_URL}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: passwordInput.value }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      errorEl.textContent = data.detail || "Şifre yanlış.";
+      submitBtn.disabled = false;
+      return;
+    }
+
+    authToken = data.token;
+    localStorage.setItem("authToken", authToken);
+    passwordInput.value = "";
+    hideLogin();
+    loadChatList();
+  } catch (err) {
+    errorEl.textContent = "Bağlantı hatası, tekrar deneyin.";
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+// Sayfa ilk açıldığında: daha önce giriş yapılmışsa (token varsa) direkt uygulamayı göster,
+// yoksa giriş ekranını göster.
+if (authToken) {
+  hideLogin();
+} else {
+  showLogin();
+}
+
 // "Şu an hangi sohbetteyiz" bilgisini tutan durum (state) değişkeni.
 // Sayfa ilk açıldığında henüz bir sohbet seçilmediği için null.
 let currentChatId = null;
@@ -232,7 +353,8 @@ if (window.innerWidth <= 640) {
 /* --- Sohbet listesini backend'den çekip sol menüye basar --- */
 async function loadChatList() {
   try {
-    const res = await fetch(`${API_URL}/chats`);
+    const res = await fetch(`${API_URL}/chats`, { headers: authHeaders() });
+    if (handleUnauthorized(res)) return;
     const chats = await res.json();
     renderChatList(chats);
   } catch (err) {
@@ -264,7 +386,8 @@ async function selectChat(chatId) {
   document.getElementById("chat-box").innerHTML = "";
 
   try {
-    const res = await fetch(`${API_URL}/chats/${chatId}/messages`);
+    const res = await fetch(`${API_URL}/chats/${chatId}/messages`, { headers: authHeaders() });
+    if (handleUnauthorized(res)) return;
     const messages = await res.json();
     messages.forEach(m => {
       if (m.role === "user") {
@@ -286,7 +409,8 @@ async function selectChat(chatId) {
 /* --- Yeni boş sohbet başlatır --- */
 async function startNewChat() {
   try {
-    const res = await fetch(`${API_URL}/chats`, { method: "POST" });
+    const res = await fetch(`${API_URL}/chats`, { method: "POST", headers: authHeaders() });
+    if (handleUnauthorized(res)) return;
     const data = await res.json();
     currentChatId = data.id;
   } catch (err) {
@@ -297,8 +421,10 @@ async function startNewChat() {
   closeSidebarOnMobile();
 }
 
-// Sayfa ilk açıldığında sohbet listesini yükle
-loadChatList();
+// Sayfa ilk açıldığında: giriş yapılmışsa (token varsa) sohbet listesini yükle
+if (authToken) {
+  loadChatList();
+}
 let chartCounter = 0;
 
 /* --- Tema (light/dark) --- */
@@ -348,7 +474,8 @@ async function uploadPdf() {
   formData.append("file", file);
 
   try {
-    const response = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
+    const response = await fetch(`${API_URL}/upload`, { method: "POST", body: formData, headers: authHeaders() });
+    if (handleUnauthorized(response)) { uploadBtn.disabled = false; return; }
     const data = await response.json();
     const elapsed = Date.now() - startTime;
     if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
@@ -385,7 +512,8 @@ async function uploadExcel() {
   formData.append("file", file);
 
   try {
-    const response = await fetch(`${API_URL}/upload-excel`, { method: "POST", body: formData });
+    const response = await fetch(`${API_URL}/upload-excel`, { method: "POST", body: formData, headers: authHeaders() });
+    if (handleUnauthorized(response)) { uploadBtn.disabled = false; return; }
     const data = await response.json();
     const elapsed = Date.now() - startTime;
     if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
@@ -422,9 +550,10 @@ async function sendQuestion(overrideText) {
   try {
     const response = await fetch(`${API_URL}/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ question, chat_id: currentChatId }),
     });
+    if (handleUnauthorized(response)) { typingEl.remove(); sendBtn.disabled = false; return; }
     const data = await response.json();
     const elapsed = Date.now() - startTime;
     if (elapsed < 600) await new Promise(r => setTimeout(r, 600 - elapsed));
