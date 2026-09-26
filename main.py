@@ -225,6 +225,9 @@ async def chat(q: Question, _: None = Depends(require_auth)):
             chat_store.add_message(chat_id, "assistant", content=answer)
             return {"answer": answer, "chat_id": chat_id}
 
+        print(f"[DEBUG] /chat -> chart alanı: {result.get('chart')}")
+        print(f"[DEBUG] /chat -> table var mı: {result.get('table') is not None}, sql var mı: {result.get('sql') is not None}")
+
         # Data RAG soruyu veriyle ilişkilendiremediyse (sql=None) ve PDF de varsa, doküman RAG'ını dene
         if result.get("sql") is None and result.get("table") is None and has_pdf:
             try:
