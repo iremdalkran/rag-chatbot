@@ -55,13 +55,16 @@ def init_tables():
             created_at TEXT NOT NULL
         )
     """)
+    # "sessions" tablosu ESKİ (tek şifreli) sistemde zaten oluşturulmuş olabilir — o zaman
+    # user_id kolonu yoktu. CREATE TABLE IF NOT EXISTS, tablo zaten varsa hiçbir şey yapmaz,
+    # bu yüzden eksik kolonu ayrıca ALTER TABLE ile ekliyoruz (chat_store.py'deki aynı desen).
     cur.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
             token TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
             created_at TEXT NOT NULL
         )
     """)
+    cur.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)")
     conn.commit()
     cur.close()
     conn.close()
