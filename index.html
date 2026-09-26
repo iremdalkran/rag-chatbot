@@ -9,7 +9,8 @@
 <title>Doküman Chatbot</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"
+  onerror="var s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js'; document.head.appendChild(s); console.warn('cdnjs basarisiz, jsdelivr yedegi yukleniyor');"></script>
 <script>
   tailwind.config = { darkMode: 'class' };
 </script>
@@ -728,8 +729,12 @@ function renderChart(chart) {
       });
     } catch (err) {
       // Devtools'a hiç gerek kalmadan hatayı doğrudan ekranda gösteriyoruz
+      const isLibMissing = err.message && err.message.includes("Chart is not defined");
+      const friendlyMsg = isLibMissing
+        ? "Grafik kütüphanesi yüklenemedi (muhtemelen geçici bir ağ sorunu). Sayfayı yenileyip (Cmd+Shift+R) tekrar deneyin."
+        : `Grafik çizilemedi: ${err.message} (tip: ${chart.style})`;
       canvasWrap.innerHTML = `<div style="color:#ef4444; font-size:12px; padding:8px; border:1px solid #ef4444; border-radius:8px;">
-        Grafik çizilemedi: ${err.message} (tip: ${chart.style})
+        ${friendlyMsg}
       </div>`;
       console.error("Grafik cizim hatasi:", err);
     }
