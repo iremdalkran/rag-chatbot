@@ -1,19 +1,17 @@
 """
 chat_store.py
 -------------
-Sol menüdeki sohbet listesini ve mesaj geçmişini KALICI olarak saklayan modül.
+Sol menüdeki sohbet listesini ve mesaj geçmişini KİŞİYE ÖZEL ve KALICI olarak saklayan modül.
 
-ÖNEMLİ DEĞİŞİKLİK: Önceki sürüm yerel bir SQLite dosyası (chats.db) kullanıyordu — Render'da
-her deploy'da bu dosya siliniyordu. Şimdi Supabase'in ücretsiz barındırdığı bir PostgreSQL
-veritabanına bağlanıyoruz; bu veritabanı Render'dan tamamen bağımsız olduğu için deploy'lar
-arasında hiç silinmiyor, kalıcı.
+ÖNEMLİ DEĞİŞİKLİK: Artık her sohbet bir kullanıcıya (user_id) ait. Bir kullanıcı sadece
+KENDİ sohbetlerini listeleyebilir/okuyabilir — chat_exists ve get_messages, sohbetin
+gerçekten o kullanıcıya ait olup olmadığını da kontrol ediyor (biri başkasının sohbet
+numarasını tahmin etse bile içeriğini göremez).
 
-Bağlantı bilgisi DATABASE_URL ortam değişkeninden okunuyor:
-  - Yerelde: .env dosyasına DATABASE_URL=postgresql://... satırını eklemeniz gerekiyor.
-  - Render'da: Environment sekmesinden aynı adla eklemeniz gerekiyor.
+Postgres'e (Supabase) bağlanıyor — DATABASE_URL ortam değişkeninden okunuyor.
 
-İki tablo var:
-  chats(id, title, created_at)
+Tablolar:
+  chats(id, user_id, title, created_at)
   messages(id, chat_id, role, content, table_json, sql, chart_json, suggestions_json, created_at)
 """
 
@@ -46,14 +44,21 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS chats (
             id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
             title TEXT NOT NULL,
             created_at TEXT NOT NULL
         )
     """)
+    # MİGRASYON: Bu tablo daha önce (kullanıcı hesapları eklenmeden önce) oluşturulmuş
+    # olabilir — o zaman user_id kolonu yoktur. "IF NOT EXISTS" sayesinde tablo zaten
+    # varsa CREATE TABLE hiçbir şey yapmıyor, bu yüzden kolonu ayrıca, varsa dokunmadan
+    # ekliyoruz. Eski (kullanıcısız) sohbetler user_id=NULL kalır ve artık hiçbir
+    # kullanıcının listesinde görünmez — bu, test verisi olduğu için sorun değil.
+    cur.execute("ALTER TABLE chats ADD COLUMN IF NOT EXISTS user_id INTEGER")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS messages (
             id SERIAL PRIMARY KEY,
-            chat_id INTEGER NOT NULL REFERENCES chats(id),
+            chat_id INTEGER NOT NULL,
             role TEXT NOT NULL,
             content TEXT,
             table_json TEXT,
@@ -77,12 +82,12 @@ def _make_title(question: str) -> str:
     return question[:40] + ("…" if len(question) > 40 else "")
 
 
-def create_chat(title: Optional[str] = None) -> int:
+def create_chat(user_id: int, title: Optional[str] = None) -> int:
     conn = _connect()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO chats (title, created_at) VALUES (%s, %s) RETURNING id",
-        (title or "Yeni sohbet", _now()),
+        "INSERT INTO chats (user_id, title, created_at) VALUES (%s, %s, %s) RETURNING id",
+        (user_id, title or "Yeni sohbet", _now()),
     )
     chat_id = cur.fetchone()[0]
     conn.commit()
@@ -91,20 +96,24 @@ def create_chat(title: Optional[str] = None) -> int:
     return chat_id
 
 
-def list_chats() -> list:
+def list_chats(user_id: int) -> list:
     conn = _connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT id, title, created_at FROM chats ORDER BY id DESC")
+    cur.execute(
+        "SELECT id, title, created_at FROM chats WHERE user_id = %s ORDER BY id DESC",
+        (user_id,),
+    )
     rows = cur.fetchall()
     cur.close()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def chat_exists(chat_id: int) -> bool:
+def chat_exists(chat_id: int, user_id: int) -> bool:
+    """Sohbet var mı VE bu kullanıcıya mı ait — ikisini birden kontrol eder."""
     conn = _connect()
     cur = conn.cursor()
-    cur.execute("SELECT id FROM chats WHERE id = %s", (chat_id,))
+    cur.execute("SELECT id FROM chats WHERE id = %s AND user_id = %s", (chat_id, user_id))
     row = cur.fetchone()
     cur.close()
     conn.close()
@@ -155,10 +164,16 @@ def add_message(
     conn.close()
 
 
-def get_messages(chat_id: int) -> list:
+def get_messages(chat_id: int, user_id: int) -> list:
+    """Sadece chat_id'nin GERÇEKTEN user_id'ye ait olduğu doğrulandıktan sonra mesajları döner."""
+    if not chat_exists(chat_id, user_id):
+        return []
+
     conn = _connect()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT * FROM messages WHERE chat_id = %s ORDER BY id ASC", (chat_id,))
+    cur.execute(
+        "SELECT * FROM messages WHERE chat_id = %s ORDER BY id ASC", (chat_id,)
+    )
     rows = cur.fetchall()
     cur.close()
     conn.close()

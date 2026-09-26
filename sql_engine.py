@@ -177,11 +177,11 @@ def _infer_chart(df: pd.DataFrame, preferred_style: str = "bar"):
     }
 
 
-def ask_data(question: str) -> dict:
-    """Tüm Data akışını uçtan uca çalıştırır ve arayüzün ihtiyacı olan JSON'u döner."""
-    print(f"[DEBUG] ask_data çağrıldı, soru: {question!r}")
+def ask_data(question: str, user_id: int) -> dict:
+    """Tüm Data akışını uçtan uca çalıştırır — SADECE bu kullanıcının kendi verisiyle."""
+    print(f"[DEBUG] ask_data çağrıldı, kullanıcı: {user_id}, soru: {question!r}")
 
-    schema_context = get_active_schema_context()
+    schema_context = get_active_schema_context(user_id)
     if schema_context is None:
         return {
             "mode": "data",
@@ -236,5 +236,5 @@ def ask_data(question: str) -> dict:
         },
         "chart": chart,
         "suggestions": summary.get("suggestions", []),
-        "used_table": get_active_table_name(),
+        "used_table": get_active_table_name(user_id),
     }

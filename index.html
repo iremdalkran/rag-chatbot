@@ -145,23 +145,36 @@
 </head>
 <body class="h-full bg-zinc-50 dark:bg-zinc-900 transition-colors">
 
-<!-- Giriş ekranı: doğru şifre girilene kadar her şeyin üstünü kaplar -->
+<!-- Giriş / Kayıt ol ekranı: geçerli bir oturum olmadan her şeyin üstünü kaplar -->
 <div id="login-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-zinc-50 dark:bg-zinc-900 px-4">
-  <form id="login-form" class="w-full max-w-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-sm p-6 flex flex-col gap-4">
-    <div class="flex items-center gap-2 justify-center">
+  <form id="auth-form" class="w-full max-w-sm bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-sm p-6 flex flex-col gap-3">
+    <div class="flex items-center gap-2 justify-center mb-1">
       <div class="w-9 h-9 rounded-lg bg-violet-600 flex items-center justify-center text-white">
         <i class="fa-solid fa-file-lines text-sm"></i>
       </div>
       <h1 class="font-semibold text-zinc-800 dark:text-zinc-100 text-base">Doküman Chatbot</h1>
     </div>
-    <p class="text-xs text-zinc-500 dark:text-zinc-400 text-center">Devam etmek için şifreyi girin.</p>
-    <input type="password" id="login-password" placeholder="Şifre"
+    <p id="auth-subtitle" class="text-xs text-zinc-500 dark:text-zinc-400 text-center mb-1">Devam etmek için giriş yapın.</p>
+
+    <!-- Sadece "kayıt ol" modunda görünür -->
+    <input type="text" id="auth-name" placeholder="Adınız" autocomplete="name"
+      class="hidden w-full border border-zinc-300 dark:border-zinc-600 bg-transparent rounded-lg px-3 py-2.5 text-sm text-zinc-800 dark:text-zinc-100 outline-none focus:border-violet-500">
+
+    <input type="email" id="auth-email" placeholder="E-posta" autocomplete="email"
       class="w-full border border-zinc-300 dark:border-zinc-600 bg-transparent rounded-lg px-3 py-2.5 text-sm text-zinc-800 dark:text-zinc-100 outline-none focus:border-violet-500">
-    <button type="submit"
-      class="w-full bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-colors">
+
+    <input type="password" id="auth-password" placeholder="Şifre" autocomplete="current-password"
+      class="w-full border border-zinc-300 dark:border-zinc-600 bg-transparent rounded-lg px-3 py-2.5 text-sm text-zinc-800 dark:text-zinc-100 outline-none focus:border-violet-500">
+
+    <button type="submit" id="auth-submit-btn"
+      class="w-full bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 rounded-lg transition-colors mt-1">
       Giriş yap
     </button>
-    <p id="login-error" class="text-xs text-red-500 text-center min-h-[1em]"></p>
+    <p id="auth-error" class="text-xs text-red-500 text-center min-h-[1em]"></p>
+
+    <button type="button" id="auth-toggle-btn" class="text-xs text-violet-600 hover:underline">
+      Hesabın yok mu? Kayıt ol
+    </button>
   </form>
 </div>
 
@@ -174,14 +187,17 @@
       <div class="sidebar-empty">Henüz sohbet yok.</div>
     </div>
 
-    <!-- Profil etiketi — bu tek kullanıcılı sistemde sabit yazılı, gerçek bir hesap sistemi değil.
-         Adınızı/e-postanızı değiştirmek isterseniz aşağıdaki iki satırı düzenlemeniz yeterli. -->
+    <!-- Profil etiketi — artık gerçek kullanıcı bilgisiyle dolduruluyor (bkz. applyLoggedInUser) -->
     <div class="sidebar-profile">
-      <div class="sidebar-profile-avatar">İ</div>
+      <div class="sidebar-profile-avatar" id="profile-avatar">?</div>
       <div class="sidebar-profile-text">
-        <div class="sidebar-profile-name">İrem</div>
-        <div class="sidebar-profile-email">iremdalkiran.06@gmail.com</div>
+        <div class="sidebar-profile-name" id="profile-name">—</div>
+        <div class="sidebar-profile-email" id="profile-email">—</div>
       </div>
+      <button id="logout-btn" onclick="logout()" title="Çıkış yap"
+        class="ml-auto text-zinc-400 hover:text-red-500 flex-shrink-0">
+        <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
+      </button>
     </div>
   </aside>
 
@@ -290,31 +306,73 @@ function hideLogin() {
   document.getElementById("login-overlay").classList.add("hidden");
 }
 
-document.getElementById("login-form").addEventListener("submit", async (e) => {
+/* --- Sol alttaki profil etiketini gerçek kullanıcı bilgisiyle doldurur --- */
+function applyLoggedInUser(name, email) {
+  document.getElementById("profile-name").textContent = name || "—";
+  document.getElementById("profile-email").textContent = email || "—";
+  document.getElementById("profile-avatar").textContent = (name || "?").trim().charAt(0).toUpperCase();
+}
+
+/* --- authMode: "login" ya da "register" — forma göre alanları/metni değiştirir --- */
+let authMode = "login";
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const nameInput = document.getElementById("auth-name");
+  const subtitle = document.getElementById("auth-subtitle");
+  const submitBtn = document.getElementById("auth-submit-btn");
+  const toggleBtn = document.getElementById("auth-toggle-btn");
+
+  if (mode === "register") {
+    nameInput.classList.remove("hidden");
+    subtitle.textContent = "Yeni bir hesap oluşturun.";
+    submitBtn.textContent = "Kayıt ol";
+    toggleBtn.textContent = "Zaten hesabın var mı? Giriş yap";
+  } else {
+    nameInput.classList.add("hidden");
+    subtitle.textContent = "Devam etmek için giriş yapın.";
+    submitBtn.textContent = "Giriş yap";
+    toggleBtn.textContent = "Hesabın yok mu? Kayıt ol";
+  }
+  document.getElementById("auth-error").textContent = "";
+}
+
+document.getElementById("auth-toggle-btn").addEventListener("click", () => {
+  setAuthMode(authMode === "login" ? "register" : "login");
+});
+
+document.getElementById("auth-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const passwordInput = document.getElementById("login-password");
-  const errorEl = document.getElementById("login-error");
-  const submitBtn = e.target.querySelector("button[type=submit]");
+  const nameInput = document.getElementById("auth-name");
+  const emailInput = document.getElementById("auth-email");
+  const passwordInput = document.getElementById("auth-password");
+  const errorEl = document.getElementById("auth-error");
+  const submitBtn = document.getElementById("auth-submit-btn");
 
   errorEl.textContent = "";
   submitBtn.disabled = true;
 
+  const endpoint = authMode === "register" ? "/register" : "/login";
+  const body = authMode === "register"
+    ? { name: nameInput.value, email: emailInput.value, password: passwordInput.value }
+    : { email: emailInput.value, password: passwordInput.value };
+
   try {
-    const res = await fetch(`${API_URL}/login`, {
+    const res = await fetch(`${API_URL}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: passwordInput.value }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
 
     if (!res.ok) {
-      errorEl.textContent = data.detail || "Şifre yanlış.";
-      submitBtn.disabled = false;
+      errorEl.textContent = data.detail || "Bir şeyler ters gitti.";
       return;
     }
 
     authToken = data.token;
     localStorage.setItem("authToken", authToken);
+    applyLoggedInUser(data.name, data.email);
     passwordInput.value = "";
     hideLogin();
     loadChatList();
@@ -325,13 +383,38 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   }
 });
 
-// Sayfa ilk açıldığında: daha önce giriş yapılmışsa (token varsa) direkt uygulamayı göster,
-// yoksa giriş ekranını göster.
-if (authToken) {
-  hideLogin();
-} else {
+function logout() {
+  authToken = null;
+  localStorage.removeItem("authToken");
+  document.getElementById("chat-list").innerHTML = "";
+  currentChatId = null;
+  document.getElementById("chat-box").innerHTML = "";
   showLogin();
 }
+
+/* --- Sayfa ilk açıldığında: token varsa gerçekten geçerli mi diye /me ile doğrula --- */
+async function checkExistingSession() {
+  if (!authToken) {
+    showLogin();
+    return;
+  }
+  try {
+    const res = await fetch(`${API_URL}/me`, { headers: authHeaders() });
+    if (!res.ok) {
+      authToken = null;
+      localStorage.removeItem("authToken");
+      showLogin();
+      return;
+    }
+    const user = await res.json();
+    applyLoggedInUser(user.name, user.email);
+    hideLogin();
+    loadChatList();
+  } catch (err) {
+    showLogin();
+  }
+}
+checkExistingSession();
 
 // "Şu an hangi sohbetteyiz" bilgisini tutan durum (state) değişkeni.
 // Sayfa ilk açıldığında henüz bir sohbet seçilmediği için null.
@@ -422,10 +505,6 @@ async function startNewChat() {
   closeSidebarOnMobile();
 }
 
-// Sayfa ilk açıldığında: giriş yapılmışsa (token varsa) sohbet listesini yükle
-if (authToken) {
-  loadChatList();
-}
 let chartCounter = 0;
 
 /* --- Tema (light/dark) --- */

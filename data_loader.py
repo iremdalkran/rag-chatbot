@@ -1,19 +1,16 @@
 """
 data_loader.py
 ----------------
-Basitleştirilmiş "Data RAG" ingestion katmanı.
+KİŞİYE ÖZEL "Data RAG" ingestion katmanı.
 
-ÖNEMLİ DEĞİŞİKLİK (önceki sürüme göre): Sistem artık her zaman TEK bir aktif veri seti ile
-çalışıyor (yeni dosya yüklenince öncekini siliyor — bkz. clear_all_data). Bu sayede "hangi
-tabloya bakmalıyım" sorusunu embedding/vektör arama (Chroma + Voyage) ile bulmaya hiç gerek
-kalmadı: tek tablo olduğu için doğrudan SQLite şemasını okuyup Claude'a veriyoruz.
+ÖNEMLİ DEĞİŞİKLİK: Artık her kullanıcının kendi aktif veri seti var — biri Excel yüklediğinde
+sadece KENDİ önceki verisi silinip yerine yenisi geliyor, başka bir kullanıcının verisine hiç
+dokunulmuyor. Bunu, SQLite tablo adlarının başına kullanıcı numarasını önek (prefix) olarak
+ekleyerek yapıyoruz: "u3_urun_satislari" gibi — yani "3 numaralı kullanıcının urun_satislari
+tablosu". Bir kullanıcının tabloları ararken sadece "u{user_id}_" ile başlayanlara bakıyoruz.
 
-Bunun iki faydası var:
-  1. Kod basitleşti — Chroma/embedding karmaşıklığı tamamen kalktı.
-  2. Voyage AI'ya (embedding servisi) giden istek sayısı azaldı — rate limit sorununu hafifletir.
-
-PDF tarafı (query.py / embed_and_store.py) hâlâ Voyage ile embedding kullanıyor, bu dosyaya
-dokunmadık — sadece Excel/CSV (veri) tarafını basitleştirdik.
+Şema, embedding/vektör arama olmadan doğrudan SQLite'tan okunuyor (tek aktif tablo mantığı
+sayesinde buna hiç gerek yok — bkz. get_active_schema_context).
 """
 
 import os
@@ -24,6 +21,10 @@ from typing import Optional
 import pandas as pd
 
 DB_PATH = "./data.db"
+
+
+def _table_prefix(user_id: int) -> str:
+    return f"u{user_id}_"
 
 
 def _slugify_table_name(filename: str) -> str:
@@ -44,22 +45,31 @@ def _read_any_table(file_path: str) -> pd.DataFrame:
         raise ValueError("Desteklenmeyen dosya türü. Sadece .csv, .xlsx, .xls kabul edilir.")
 
 
-def clear_all_data() -> None:
+def _user_tables(conn, user_id: int) -> list:
+    """Sadece bu kullanıcıya ait tabloların adlarını döner (önek eşleşmesiyle)."""
+    prefix = _table_prefix(user_id)
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?",
+        (prefix + "%",),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def clear_all_data(user_id: int) -> None:
     """
-    Önceki tüm yüklenmiş tabloları siler (tek aktif veri seti mantığı).
-    Yeni bir dosya yüklenmeden hemen önce çağrılır.
+    Bu kullanıcıya ait tüm tabloları siler (tek aktif veri seti mantığı — kullanıcı bazlı).
+    Başka bir kullanıcının tablolarına DOKUNMAZ. Yeni bir dosya yüklenmeden hemen önce çağrılır.
     """
     conn = sqlite3.connect(DB_PATH)
-    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-    for (name,) in tables:
+    for name in _user_tables(conn, user_id):
         conn.execute(f'DROP TABLE IF EXISTS "{name}"')
     conn.commit()
     conn.close()
 
 
-def load_tabular_file(file_path: str, table_name: Optional[str] = None) -> dict:
+def load_tabular_file(file_path: str, user_id: int, table_name: Optional[str] = None) -> dict:
     """
-    CSV/Excel dosyasını okur, önceki veriyi temizler, yeni veriyi SQLite'a yazar.
+    CSV/Excel dosyasını okur, bu kullanıcının önceki verisini temizler, yenisini SQLite'a yazar.
 
     Returns: {"table_name": ..., "row_count": ..., "columns": [...]}
     """
@@ -67,42 +77,45 @@ def load_tabular_file(file_path: str, table_name: Optional[str] = None) -> dict:
     if df.empty:
         raise ValueError("Dosya boş görünüyor.")
 
-    clear_all_data()
+    clear_all_data(user_id)
 
     if table_name is None:
         table_name = _slugify_table_name(file_path)
+    # Gerçek SQLite tablo adı, kullanıcı önekiyle birlikte
+    full_table_name = _table_prefix(user_id) + table_name
 
     # Kolon adlarını da SQL-dostu hale getir
     df.columns = [re.sub(r"[^a-zA-Z0-9_]", "_", str(c)).strip("_").lower() for c in df.columns]
 
     conn = sqlite3.connect(DB_PATH)
-    df.to_sql(table_name, conn, if_exists="replace", index=False)
+    df.to_sql(full_table_name, conn, if_exists="replace", index=False)
     conn.close()
 
+    # Dışarıya (frontend'e) kullanıcı önekini göstermeye gerek yok, orijinal adı döndürüyoruz
     return {"table_name": table_name, "row_count": len(df), "columns": list(df.columns)}
 
 
-def has_any_table() -> bool:
+def has_any_table(user_id: int) -> bool:
     conn = sqlite3.connect(DB_PATH)
-    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    tables = _user_tables(conn, user_id)
     conn.close()
     return len(tables) > 0
 
 
-def get_active_schema_context() -> Optional[str]:
+def get_active_schema_context(user_id: int) -> Optional[str]:
     """
-    Şu an aktif olan (tek) tablonun şema açıklamasını döner. sql_engine.py bunu doğrudan
-    Claude'a bağlam olarak veriyor — embedding/vektör aramaya artık gerek yok.
+    Bu kullanıcının aktif (tek) tablosunun şema açıklamasını döner. sql_engine.py bunu
+    doğrudan Claude'a bağlam olarak veriyor.
 
-    Tablo yoksa None döner.
+    Kullanıcının hiç tablosu yoksa None döner.
     """
     conn = sqlite3.connect(DB_PATH)
-    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    tables = _user_tables(conn, user_id)
     if not tables:
         conn.close()
         return None
 
-    table_name = tables[0][0]
+    table_name = tables[0]
     df_sample = pd.read_sql_query(f'SELECT * FROM "{table_name}" LIMIT 3', conn)
     row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
     conn.close()
@@ -126,8 +139,8 @@ Kolonlar:
 """
 
 
-def get_active_table_name() -> Optional[str]:
+def get_active_table_name(user_id: int) -> Optional[str]:
     conn = sqlite3.connect(DB_PATH)
-    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    tables = _user_tables(conn, user_id)
     conn.close()
-    return tables[0][0] if tables else None
+    return tables[0] if tables else None

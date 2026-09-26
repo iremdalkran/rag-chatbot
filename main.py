@@ -30,9 +30,6 @@ def _friendly_error_message(e: Exception, default: str) -> str:
     Bir hatanın 'rate limit' (Voyage/Anthropic'in dakikadaki istek sınırı) kaynaklı olup
     olmadığını anlar. Öyleyse kullanıcıya bunu doğru şekilde açıklayan bir mesaj döner,
     değilse çağıranın verdiği genel (default) mesajı döner.
-
-    Neden gerekli: Rate limit hatası "dosya bozuk" ya da "sorgu hatası" gibi görünmemeli —
-    kullanıcının yapması gereken şey dosyayı değiştirmek değil, birazcık beklemek.
     """
     text = str(e).lower()
     rate_limit_signals = ("rate limit", "rate_limit", "429", "reduced rate limits", "too many requests")
@@ -41,6 +38,7 @@ def _friendly_error_message(e: Exception, default: str) -> str:
                 "takıldı. Bu bir dosya/soru hatası değil — lütfen birkaç saniye bekleyip tekrar "
                 "deneyin. ⏳")
     return default
+
 
 # NOT: Eski kod burada `excel_df` (global DataFrame), `CHART_KEYWORDS`, `is_chart_request`,
 # `detect_chart_type`, `generate_chart` (matplotlib) fonksiyonlarını içeriyordu. Bunlar tek bir
@@ -54,57 +52,88 @@ class Question(BaseModel):
     chat_id: Optional[int] = None
 
 
-class LoginRequest(BaseModel):
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
     password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/register")
+async def register(body: RegisterRequest):
+    """Yeni kullanıcı kaydı oluşturur ve otomatik giriş yapar (bir oturum token'ı döner)."""
+    try:
+        user = auth.register_user(body.name, body.email, body.password)
+    except auth.AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    token = auth.create_session(user["id"])
+    return {"token": token, "name": user["name"], "email": user["email"]}
 
 
 @app.post("/login")
 async def login(body: LoginRequest):
-    """Paylaşılan şifreyi kontrol eder, doğruysa bir oturum token'ı döner."""
-    if not auth.check_password(body.password):
-        raise HTTPException(status_code=401, detail="Şifre yanlış.")
-    token = auth.create_session()
-    return {"token": token}
+    """E-posta+şifreyi doğrular, doğruysa bir oturum token'ı döner."""
+    try:
+        user = auth.authenticate_user(body.email, body.password)
+    except auth.AuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    token = auth.create_session(user["id"])
+    return {"token": token, "name": user["name"], "email": user["email"]}
 
 
-async def require_auth(x_auth_token: Optional[str] = Header(default=None)):
+async def require_auth(x_auth_token: Optional[str] = Header(default=None)) -> dict:
     """
     Korumalı endpoint'lerin önüne konan bağımlılık (dependency). Geçerli bir X-Auth-Token
-    header'ı yoksa isteği 401 ile reddeder. FastAPI'de bir endpoint'e Depends(require_auth)
-    eklemek, o endpoint çalışmadan ÖNCE bu fonksiyonun çalışmasını ve geçmesini şart koşar.
+    header'ı yoksa isteği 401 ile reddeder; geçerliyse o oturumun ait olduğu kullanıcının
+    bilgisini ({id, name, email}) döner — endpoint'ler bunu `user["id"]` şeklinde kullanır.
     """
-    if not auth.is_valid_session(x_auth_token):
+    user = auth.get_session_user(x_auth_token)
+    if user is None:
         raise HTTPException(status_code=401, detail="Giriş yapmanız gerekiyor.")
+    return user
+
+
+@app.get("/me")
+async def get_me(user: dict = Depends(require_auth)):
+    """Giriş yapmış kullanıcının bilgisini döner (frontend'de profil etiketi için)."""
+    return user
 
 
 @app.get("/chats")
-async def get_chats(_: None = Depends(require_auth)):
-    """Sol menüde gösterilecek sohbet listesi."""
-    return chat_store.list_chats()
+async def get_chats(user: dict = Depends(require_auth)):
+    """Sol menüde gösterilecek sohbet listesi — SADECE bu kullanıcının kendi sohbetleri."""
+    return chat_store.list_chats(user["id"])
 
 
 @app.post("/chats")
-async def create_new_chat(_: None = Depends(require_auth)):
-    """'Yeni sohbet' butonuna basınca boş bir sohbet oluşturur."""
-    chat_id = chat_store.create_chat()
+async def create_new_chat(user: dict = Depends(require_auth)):
+    """'Yeni sohbet' butonuna basınca bu kullanıcı için boş bir sohbet oluşturur."""
+    chat_id = chat_store.create_chat(user["id"])
     return {"id": chat_id, "title": "Yeni sohbet"}
 
 
 @app.get("/chats/{chat_id}/messages")
-async def get_chat_messages(chat_id: int, _: None = Depends(require_auth)):
-    """Bir sohbete tıklanınca geçmiş mesajları getirir."""
-    if not chat_store.chat_exists(chat_id):
+async def get_chat_messages(chat_id: int, user: dict = Depends(require_auth)):
+    """Bir sohbete tıklanınca geçmiş mesajları getirir — sadece kendi sohbetiyse."""
+    if not chat_store.chat_exists(chat_id, user["id"]):
         raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
-    return chat_store.get_messages(chat_id)
+    return chat_store.get_messages(chat_id, user["id"])
 
 
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...), _: None = Depends(require_auth)):
-    # 1. Dosya türü kontrolü
+async def upload_pdf(file: UploadFile = File(...), user: dict = Depends(require_auth)):
+    # Not: PDF/doküman koleksiyonu şu an TÜM kullanıcılar arasında ortak — sadece Excel/CSV
+    # verisi (aşağıdaki /upload-excel) kişiye özel hale getirildi.
+
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sadece PDF dosyaları kabul edilir.")
 
-    # 2. Dosyayı geçici olarak oku ve boyutunu kontrol et
     contents = await file.read()
     size_mb = len(contents) / (1024 * 1024)
     if size_mb > MAX_FILE_SIZE_MB:
@@ -113,12 +142,10 @@ async def upload_pdf(file: UploadFile = File(...), _: None = Depends(require_aut
             detail=f"Dosya çok büyük ({size_mb:.1f}MB). Maksimum {MAX_FILE_SIZE_MB}MB olmalı.",
         )
 
-    # 3. Dosyayı diske kaydet
     file_path = f"uploaded_{file.filename}"
     with open(file_path, "wb") as f:
         f.write(contents)
 
-    # 4. Chunking + embedding + Chroma'ya kaydetme — bozuk PDF burada patlayabilir
     try:
         embed_and_store(file_path)
     except Exception as e:
@@ -135,20 +162,17 @@ async def upload_pdf(file: UploadFile = File(...), _: None = Depends(require_aut
 
 
 @app.post("/upload-excel")
-async def upload_excel(file: UploadFile = File(...), _: None = Depends(require_auth)):
+async def upload_excel(file: UploadFile = File(...), user: dict = Depends(require_auth)):
     # Not: Endpoint adı geriye dönük uyumluluk için "upload-excel" olarak kaldı, ama artık
-    # CSV dosyalarını da kabul ediyor. Eski davranıştan farkı: DataFrame'i hafızada tek bir
-    # global değişkende tutup statik bir grafik üretmek yerine, veriyi SQLite'a yazıp şemasını
-    # RAG için embed'liyor — böylece her soruya özel SQL sorgusu üretilip çalıştırılabiliyor.
+    # CSV dosyalarını da kabul ediyor. Yüklenen veri bu kullanıcıya özel bir tabloya yazılıyor
+    # (data_loader.py'de user_id önekiyle) — başka kullanıcıların verisiyle karışmıyor.
 
-    # 1. Dosya türü kontrolü
     if not file.filename.lower().endswith((".xlsx", ".xls", ".csv")):
         raise HTTPException(
             status_code=400,
             detail="Sadece Excel (.xlsx, .xls) veya CSV dosyaları kabul edilir.",
         )
 
-    # 2. Boyut kontrolü
     contents = await file.read()
     size_mb = len(contents) / (1024 * 1024)
     if size_mb > MAX_FILE_SIZE_MB:
@@ -157,14 +181,12 @@ async def upload_excel(file: UploadFile = File(...), _: None = Depends(require_a
             detail=f"Dosya çok büyük ({size_mb:.1f}MB). Maksimum {MAX_FILE_SIZE_MB}MB olmalı.",
         )
 
-    # 3. Dosyayı diske kaydet (data_loader dosya yolundan okuyor)
     file_path = f"uploaded_{file.filename}"
     with open(file_path, "wb") as f:
         f.write(contents)
 
-    # 4. SQLite'a yaz + şemayı embed'le — bozuk dosya burada patlayabilir
     try:
-        info = load_tabular_file(file_path)
+        info = load_tabular_file(file_path, user_id=user["id"])
     except Exception as e:
         print(f"Hata (upload excel): {e}")
         traceback.print_exc()
@@ -187,24 +209,21 @@ async def upload_excel(file: UploadFile = File(...), _: None = Depends(require_a
 
 
 @app.post("/chat")
-async def chat(q: Question, _: None = Depends(require_auth)):
-    # 1. Boş soru kontrolü
+async def chat(q: Question, user: dict = Depends(require_auth)):
     question = q.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Soru boş olamaz.")
 
-    # 2. Sohbet id'si yoksa ya da geçersizse yeni bir sohbet oluştur
     chat_id = q.chat_id
-    if chat_id is None or not chat_store.chat_exists(chat_id):
-        chat_id = chat_store.create_chat()
+    if chat_id is None or not chat_store.chat_exists(chat_id, user["id"]):
+        chat_id = chat_store.create_chat(user["id"])
 
     chat_store.add_message(chat_id, "user", content=question)
     chat_store.maybe_set_title_from_first_message(chat_id, question)
 
     has_pdf = collection.count() > 0
-    has_data = has_any_table()
+    has_data = has_any_table(user["id"])
 
-    # 3. Hiçbir şey yüklenmemişse
     if not has_pdf and not has_data:
         answer = ("Merhaba! Henüz bir dosya yüklemediniz. Verilerinizi analiz etmemi "
                   "istiyorsanız bir Excel/CSV, dokümanlarınızla ilgili soru sormak "
@@ -212,10 +231,9 @@ async def chat(q: Question, _: None = Depends(require_auth)):
         chat_store.add_message(chat_id, "assistant", content=answer)
         return {"answer": answer, "chat_id": chat_id}
 
-    # 4. Veri tablosu varsa önce Data RAG akışını dene (tablo + grafik + SQL + öneri)
     if has_data:
         try:
-            result = ask_data(question)
+            result = ask_data(question, user_id=user["id"])
         except Exception as e:
             print(f"Hata (chat - data): {e}")
             traceback.print_exc()
@@ -225,10 +243,6 @@ async def chat(q: Question, _: None = Depends(require_auth)):
             chat_store.add_message(chat_id, "assistant", content=answer)
             return {"answer": answer, "chat_id": chat_id}
 
-        print(f"[DEBUG] /chat -> chart alanı: {result.get('chart')}")
-        print(f"[DEBUG] /chat -> table var mı: {result.get('table') is not None}, sql var mı: {result.get('sql') is not None}")
-
-        # Data RAG soruyu veriyle ilişkilendiremediyse (sql=None) ve PDF de varsa, doküman RAG'ını dene
         if result.get("sql") is None and result.get("table") is None and has_pdf:
             try:
                 answer = ask(question)
@@ -254,7 +268,6 @@ async def chat(q: Question, _: None = Depends(require_auth)):
         result["chat_id"] = chat_id
         return result
 
-    # 5. Sadece PDF varsa klasik doküman RAG akışı
     try:
         answer = ask(question)
     except Exception as e:
