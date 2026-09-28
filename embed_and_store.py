@@ -13,7 +13,17 @@ chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(name="dokuman_chunklari")
 
 
-def embed_and_store(pdf_path):
+def embed_and_store(pdf_path, user_id):
+    """
+    PDF'i parçalara bölüp embed'ler ve Chroma'ya kaydeder.
+
+    KİŞİYE ÖZEL: Her parçaya metadata olarak {"user_id": ...} yazılıyor; query.py aramayı
+    sadece bu etikete sahip parçalarla sınırlıyor. Böylece bir kullanıcının PDF'i başkasına
+    görünmüyor.
+
+    Bir kullanıcı yeni PDF yüklediğinde SADECE kendi önceki PDF parçaları silinir (tek aktif
+    doküman mantığı — Excel/CSV tarafıyla aynı). Başkalarının parçalarına dokunulmaz.
+    """
     # 1. Dokümanı oku ve chunk'lara böl
     text = read_pdf(pdf_path)
     chunks = chunk_text(text, chunk_size=100, overlap=20)
@@ -24,16 +34,24 @@ def embed_and_store(pdf_path):
     embeddings = result.embeddings
     print("Embedding'ler oluşturuldu.")
 
-    # 3. Chroma'ya kaydet
-    ids = [f"chunk_{i}" for i in range(len(chunks))]
+    # 3. Eski parçaları embedding BAŞARILI olduktan sonra sil (embedding hata verirse
+    #    kullanıcının önceki PDF'i kaybolmasın diye sıra önemli).
+    collection.delete(where={"user_id": user_id})
+
+    # 4. Chroma'ya kaydet. id'lere user_id ekliyoruz: eskiden hep "chunk_0, chunk_1..." idi ve
+    #    farklı yüklemeler birbirinin id'siyle çakışabiliyordu.
+    ids = [f"u{user_id}_chunk_{i}" for i in range(len(chunks))]
+    metadatas = [{"user_id": user_id} for _ in chunks]
     collection.add(
         ids=ids,
         embeddings=embeddings,
         documents=chunks,
+        metadatas=metadatas,
     )
-    print(f"{len(chunks)} chunk Chroma'ya kaydedildi.")
+    print(f"{len(chunks)} chunk Chroma'ya kaydedildi (user_id={user_id}).")
 
 
 if __name__ == "__main__":
-    embed_and_store("ornek_dokuman.pdf")
+    # Komut satırından hızlı deneme için: user_id=0 test kullanıcısı gibi davranır.
+    embed_and_store("ornek_dokuman.pdf", user_id=0)
     print("\nToplam kayıtlı chunk sayısı:", collection.count())

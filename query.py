@@ -13,15 +13,28 @@ chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(name="dokuman_chunklari")
 
 
-def ask(question, top_k=2):
+def has_user_pdf(user_id):
+    """Bu kullanıcının yüklediği en az bir PDF parçası var mı? (limit=1: sadece varlık kontrolü,
+    tüm parçaları belleğe çekmiyoruz.)"""
+    found = collection.get(where={"user_id": user_id}, limit=1)
+    return len(found["ids"]) > 0
+
+
+def ask(question, user_id, top_k=2):
     # 1. Soruyu embedding'e çevir
     result = voyage_client.embed([question], model="voyage-3.5", input_type="query")
     question_embedding = result.embeddings[0]
 
-    # 2. Chroma'da en yakın chunk'ları ara
+    # 2. Chroma'da en yakın chunk'ları ara — SADECE bu kullanıcının parçaları arasında.
+    #    Kullanıcının top_k'dan az parçası varsa, istenen sonuç sayısını ona göre düşürüyoruz.
+    available = len(collection.get(where={"user_id": user_id}, limit=top_k)["ids"])
+    if available == 0:
+        return "Henüz bir doküman yüklemediniz. Lütfen önce bir PDF yükleyin."
+
     results = collection.query(
         query_embeddings=[question_embedding],
-        n_results=top_k,
+        n_results=min(top_k, available),
+        where={"user_id": user_id},
     )
     relevant_chunks = results["documents"][0]
 
@@ -51,9 +64,10 @@ Bağlam:
 
 
 if __name__ == "__main__":
+    # Komut satırından hızlı deneme için: user_id=0 test kullanıcısı gibi davranır.
     while True:
         question = input("\nSoru sor (çıkmak için 'q'): ")
         if question.lower() == "q":
             break
-        answer = ask(question)
+        answer = ask(question, user_id=0)
         print("\nCevap:", answer)
