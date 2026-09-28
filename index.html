@@ -473,6 +473,13 @@ async function selectChat(chatId) {
     const res = await fetch(`${API_URL}/chats/${chatId}/messages`, { headers: authHeaders() });
     if (handleUnauthorized(res)) return;
     const messages = await res.json();
+
+    // Yarış durumu (race condition) koruması: bu istek bekletilirken kullanıcı BAŞKA bir
+    // sohbete tıklamış olabilir. O zaman currentChatId artık bu isteğin ait olduğu chatId
+    // değildir — bu durumda gelen (artık eski/geçersiz olan) sonucu ekrana hiç basmıyoruz,
+    // yoksa yanlış sohbetin mesajları başka bir sohbetin üzerine karışır.
+    if (currentChatId !== chatId) return;
+
     messages.forEach(m => {
       if (m.role === "user") {
         addMessage(m.content, "user");
@@ -486,8 +493,10 @@ async function selectChat(chatId) {
     console.error("Sohbet geçmişi alınamadı:", err);
   }
 
-  loadChatList(); // aktif sohbeti menüde vurgulamak için listeyi tazele
-  closeSidebarOnMobile();
+  if (currentChatId === chatId) {
+    loadChatList(); // aktif sohbeti menüde vurgulamak için listeyi tazele
+    closeSidebarOnMobile();
+  }
 }
 
 /* --- Yeni boş sohbet başlatır --- */
@@ -620,6 +629,10 @@ async function sendQuestion(overrideText) {
   const question = (overrideText !== undefined ? overrideText : input.value).trim();
   if (!question) return;
 
+  // Bu soru hangi sohbette soruldu, kaydediyoruz — cevap gelene kadar kullanıcı başka bir
+  // sohbete geçerse (currentChatId değişirse), cevabı YANLIŞ sohbetin üzerine basmamak için.
+  const askedChatId = currentChatId;
+
   addMessage(question, "user");
   if (overrideText === undefined) input.value = "";
   sendBtn.disabled = true;
@@ -631,7 +644,7 @@ async function sendQuestion(overrideText) {
     const response = await fetch(`${API_URL}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ question, chat_id: currentChatId }),
+      body: JSON.stringify({ question, chat_id: askedChatId }),
     });
     if (handleUnauthorized(response)) { typingEl.remove(); sendBtn.disabled = false; return; }
     const data = await response.json();
@@ -644,6 +657,14 @@ async function sendQuestion(overrideText) {
       addMessage(`Hata: ${data.detail}`, "bot");
       return;
     }
+
+    if (currentChatId !== askedChatId) {
+      // Kullanıcı cevabı beklerken başka bir sohbete geçmiş — cevabı orada gösterme,
+      // sadece arka planda sohbet listesini (yeni başlık vb. için) tazele.
+      loadChatList();
+      return;
+    }
+
     // Backend chat_id'yi döner (ilk soruda otomatik açılan sohbetin id'si budur)
     if (data.chat_id) {
       currentChatId = data.chat_id;
