@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from embed_and_store import embed_and_store
-from query import ask, collection
+from query import ask, has_user_pdf
 
 from data_loader import load_tabular_file, has_any_table
 from sql_engine import ask_data
@@ -128,8 +128,8 @@ async def get_chat_messages(chat_id: int, user: dict = Depends(require_auth)):
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...), user: dict = Depends(require_auth)):
-    # Not: PDF/doküman koleksiyonu şu an TÜM kullanıcılar arasında ortak — sadece Excel/CSV
-    # verisi (aşağıdaki /upload-excel) kişiye özel hale getirildi.
+    # PDF parçaları artık kullanıcıya özel: embed_and_store her parçaya user_id etiketi yazıyor,
+    # query.ask da sadece o kullanıcının parçalarında arıyor.
 
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Sadece PDF dosyaları kabul edilir.")
@@ -142,21 +142,26 @@ async def upload_pdf(file: UploadFile = File(...), user: dict = Depends(require_
             detail=f"Dosya çok büyük ({size_mb:.1f}MB). Maksimum {MAX_FILE_SIZE_MB}MB olmalı.",
         )
 
-    file_path = f"uploaded_{file.filename}"
+    # Geçici dosya adına user_id ekliyoruz: iki kullanıcı aynı adlı dosya yüklerse birbirinin
+    # dosyasını ezmesin. İşi bitince (başarılı ya da hatalı) dosyayı siliyoruz.
+    file_path = f"uploaded_u{user['id']}_{file.filename}"
     with open(file_path, "wb") as f:
         f.write(contents)
 
     try:
-        embed_and_store(file_path)
+        embed_and_store(file_path, user["id"])
     except Exception as e:
         print(f"Hata (upload pdf): {e}")
-        os.remove(file_path)
+        traceback.print_exc()
         raise HTTPException(
             status_code=400,
             detail=_friendly_error_message(
                 e, "PDF okunamadı. Dosya bozuk olabilir, lütfen başka bir dosya deneyin."
             ),
         )
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
     return {"status": "başarılı", "dosya": file.filename}
 
@@ -221,7 +226,7 @@ async def chat(q: Question, user: dict = Depends(require_auth)):
     chat_store.add_message(chat_id, "user", content=question)
     chat_store.maybe_set_title_from_first_message(chat_id, question)
 
-    has_pdf = collection.count() > 0
+    has_pdf = has_user_pdf(user["id"])
     has_data = has_any_table(user["id"])
 
     if not has_pdf and not has_data:
@@ -245,7 +250,7 @@ async def chat(q: Question, user: dict = Depends(require_auth)):
 
         if result.get("sql") is None and result.get("table") is None and has_pdf:
             try:
-                answer = ask(question)
+                answer = ask(question, user["id"])
                 chat_store.add_message(chat_id, "assistant", content=answer)
                 return {"answer": answer, "chat_id": chat_id}
             except Exception as e:
@@ -269,7 +274,7 @@ async def chat(q: Question, user: dict = Depends(require_auth)):
         return result
 
     try:
-        answer = ask(question)
+        answer = ask(question, user["id"])
     except Exception as e:
         print(f"Hata (chat - pdf): {e}")
         answer = _friendly_error_message(
