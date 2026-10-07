@@ -1,0 +1,114 @@
+# Doküman Asistanı (tamamen yerel)
+
+Şirket dokümanlarına (PDF, Word, TXT) ve veri tablolarına (Excel, CSV) soru sorabileceğiniz bir asistan.
+**Hiçbir veri dışarı gönderilmez.** Yapay zekâ modelleri [Ollama](https://ollama.com) ile bu bilgisayarda
+veya şirketin kendi sunucusunda çalışır. İnternet sadece ilk kurulumda modelleri indirmek için gerekir.
+
+## Neler yapabilir?
+
+- **Doküman soru-cevap:** Yüklenen dokümanlarda arar ve cevabın her cümlesinin hangi dosyanın hangi
+  sayfasından geldiğini gösterir. Kaynağa tıklayınca ilgili metin açılır.
+- **Veri analizi:** Excel/CSV yükleyin, "Bölgelere göre toplam satış nedir?" diye sorun. Tablo, grafik ve
+  kullanılan SQL sorgusu birlikte gösterilir.
+- **Sohbet geçmişi:** Sohbetler kaydedilir. "Peki ya ikincisi?" gibi takip soruları anlaşılır.
+- **Kullanıcılar:** İlk giren kişi yönetici olur. Yönetici kullanıcı ekler, siler ve şifre sıfırlar.
+- **Şirket dokümanları:** Yöneticinin "Şirket dokümanı" olarak eklediği dosyaları herkes görür.
+  Kişisel dokümanları ve tabloları yalnızca sahibi görür.
+- Koyu ve açık tema, mobil uyumlu arayüz, cevabı yarıda durdurma.
+
+## Mac'te kurulum (ilk sefer)
+
+1. **Ollama'yı kurun:** https://ollama.com/download → Mac için indirip uygulamayı açın.
+2. **Python'u kurun** (yoksa): https://www.python.org/downloads/ → en son sürüm.
+3. Bu klasörde bir Terminal açın ve şunu çalıştırın:
+
+   ```bash
+   ./baslat.sh
+   ```
+
+   İlk çalıştırmada modeller indirilir (yaklaşık 10 GB, internet hızına göre 5-20 dakika).
+   Bitince tarayıcı kendiliğinden `http://127.0.0.1:8000` adresini açar (açılmazsa bu adresi Safari'ye kendiniz yazın).
+4. Açılan sayfada **yönetici hesabınızı** oluşturun.
+
+Sonraki seferlerde de sadece `./baslat.sh` yeterlidir; birkaç saniyede açılır. Durdurmak için
+Terminal'de `Ctrl + C`'ye basın.
+
+## Hangi modeller kullanılıyor?
+
+| Görev | Model | Boyut | Not |
+|---|---|---|---|
+| Sohbet / cevap yazma | `qwen3:14b` | ~9 GB | Türkçesi iyi, 24 GB bellekli Mac için dengeli seçim |
+| Doküman arama | `bge-m3` | ~1,2 GB | Türkçe dahil çok dilli |
+
+Modeli değiştirmek için `.env.example` dosyasını `.env` adıyla kopyalayıp `CHAT_MODEL` satırını
+düzenleyin. Daha hızlı cevap için `qwen3:8b`, daha akıllı cevap için `qwen3:30b-a3b` kullanılabilir
+(ikincisi 24 GB belleği zorlar, başka uygulamalar kapalıyken deneyin).
+
+## Şirket ağında kullanım
+
+- **Aynı ofisteki diğer bilgisayarlar bağlansın:** `.env` dosyasına `HOST=0.0.0.0` yazıp yeniden başlatın.
+  Terminal'de diğer bilgisayarların kullanacağı adres gösterilir.
+- **Şirket sunucusuna kurulum (Docker):**
+
+  ```bash
+  docker compose up -d
+  docker compose exec ollama ollama pull qwen3:14b
+  docker compose exec ollama ollama pull bge-m3
+  ```
+
+  Sonra `http://SUNUCU_ADRESI:8000` adresini açın. Ekran kartlı sunucular için `docker-compose.yml`
+  içindeki açıklamaya bakın.
+- İnternete açık bir adreste yayınlanacaksa önüne HTTPS koyun (ör. Caddy veya nginx) ve `.env` içinde
+  `COOKIE_SECURE=true` yapın.
+
+## Yedekleme
+
+Bütün veriler (kullanıcılar, sohbetler, dokümanlar, tablolar) `data/` klasöründedir. Yedek almak için
+uygulamayı durdurup bu klasörü kopyalamanız yeterlidir.
+
+## Güvenlik özeti
+
+- Şifreler bcrypt ile saklanır. Oturumlar 7 gün sonra düşer. 5 hatalı denemeden sonra giriş 15 dakika kilitlenir.
+- Oturum bilgisi JavaScript'in okuyamadığı bir çerezde tutulur. Sayfa, dışarıdan kod çalıştırılmasını
+  engelleyen başlıklarla sunulur.
+- Her kullanıcının Excel/CSV verisi ayrı bir dosyada durur. Yapay zekânın yazdığı SQL sorguları salt-okunur
+  çalışır ve veri silemez, değiştiremez.
+- Kendi kendine kayıt varsayılan olarak kapalıdır. Kullanıcıları yönetici ekler.
+
+## Sorun giderme
+
+| Belirti | Çözüm |
+|---|---|
+| Sarı uyarı: "Ollama çalışmıyor" | Ollama uygulamasını açın. |
+| Sarı uyarı: "Eksik model" | Uyarıda yazan `ollama pull ...` komutunu Terminal'de çalıştırın. |
+| PDF "Hata" durumunda, "taranmış" diyor | Belge resim olarak kaydedilmiş. Metin seçilebilen bir PDF yükleyin. |
+| Cevaplar yavaş | Diğer ağır uygulamaları kapatın veya `.env` içinde `CHAT_MODEL=qwen3:8b` yapın. |
+| Şifremi unuttum | Yöneticiden "Şifre sıfırla" yapmasını isteyin. |
+
+## Geliştiriciler için
+
+Sistemin nasıl çalıştığı, veri akışı ve tasarım kararları için: [ARCHITECTURE.md](ARCHITECTURE.md)
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest          # testler (gerçek Ollama gerekmez)
+.venv/bin/uvicorn app.main:app --reload
+```
+
+Klasör yapısı:
+
+```
+app/
+  main.py       web sunucusu ve API
+  config.py     ayarlar (.env)
+  db.py         SQLite veritabanı şeması
+  auth.py       kullanıcılar, oturumlar
+  llm.py        Ollama bağlantısı (dışarıyla tek bağlantı noktası)
+  ingest.py     PDF/Word/TXT okuma ve parçalama
+  documents.py  doküman kütüphanesi ve hibrit arama
+  rag.py        kaynak gösteren cevap üretimi
+  tabular.py    Excel/CSV → güvenli SQL analizi
+  chats.py      sohbet geçmişi
+static/         arayüz (internetten hiçbir şey yüklemez)
+tests/          otomatik testler
+```

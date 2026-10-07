@@ -1,0 +1,42 @@
+# Firmanın sunucusuna kurulum (Linux sunucu önerilir).
+#   Başlat:          docker compose up -d
+#   Modelleri indir: docker compose exec ollama ollama pull qwen3:14b
+#                    docker compose exec ollama ollama pull bge-m3
+#   Adres:           http://SUNUCU_ADRESI:8000
+#
+# NOT (Mac): Docker, Mac'in ekran kartını kullanamaz; Mac'te Docker yerine ./baslat.sh kullanın.
+# NOT (NVIDIA ekran kartlı sunucu): aşağıdaki "deploy" bölümünün başındaki # işaretlerini kaldırın.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    ports:
+      - "8000:8000"
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      CHAT_MODEL: ${CHAT_MODEL:-qwen3:14b}
+      EMBED_MODEL: ${EMBED_MODEL:-bge-m3}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    volumes:
+      - app-data:/data
+
+volumes:
+  ollama-models:
+  app-data:
