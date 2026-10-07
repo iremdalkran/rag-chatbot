@@ -87,6 +87,8 @@ uygulamayı durdurup bu klasörü kopyalamanız yeterlidir.
 
 ## Geliştiriciler için
 
+Sistemin nasıl çalıştığı, veri akışı ve tasarım kararları için: [ARCHITECTURE.md](ARCHITECTURE.md)
+
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest          # testler (gerçek Ollama gerekmez)
