@@ -27,7 +27,7 @@ veya şirketin kendi sunucusunda çalışır. İnternet sadece ilk kurulumda mod
    ```
 
    İlk çalıştırmada modeller indirilir (yaklaşık 10 GB, internet hızına göre 5-20 dakika).
-   Bitince tarayıcı kendiliğinden `http://localhost:8000` adresini açar.
+   Bitince tarayıcı kendiliğinden `http://127.0.0.1:8000` adresini açar (açılmazsa bu adresi Safari'ye kendiniz yazın).
 4. Açılan sayfada **yönetici hesabınızı** oluşturun.
 
 Sonraki seferlerde de sadece `./baslat.sh` yeterlidir; birkaç saniyede açılır. Durdurmak için

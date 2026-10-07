@@ -72,10 +72,20 @@ fi
 echo "✓ Python ortamı hazır"
 
 # 4) Başlat
-URL="http://localhost:$PORT"
-say "Uygulama başlatılıyor: $URL  (durdurmak için Ctrl+C)"
+URL="http://127.0.0.1:$PORT"
+say "Uygulama başlatılıyor: $URL  (durdurmak için Ctrl+C, bu pencereyi kapatmayın)"
 if [ "$HOST" = "0.0.0.0" ]; then
   echo "Şirket ağındaki diğer bilgisayarlar şu adresle bağlanabilir: http://$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}'):$PORT"
 fi
-( sleep 2; (command -v open >/dev/null && open "$URL") || (command -v xdg-open >/dev/null && xdg-open "$URL") || true ) >/dev/null 2>&1 &
+# Tarayıcıyı ancak uygulama gerçekten cevap vermeye başlayınca aç (ilk açılış bir dakikayı bulabilir).
+(
+  for _ in $(seq 1 120); do
+    if curl -fs "$URL/api/health" >/dev/null 2>&1; then
+      printf "\n\033[1;32m✓ Hazır! Tarayıcıda açın: %s\033[0m\n\n" "$URL" >&2
+      (command -v open >/dev/null && open "$URL") || (command -v xdg-open >/dev/null && xdg-open "$URL") || true
+      exit 0
+    fi
+    sleep 1
+  done
+) >/dev/null &
 exec .venv/bin/uvicorn app.main:app --host "$HOST" --port "$PORT"
