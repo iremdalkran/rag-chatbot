@@ -297,7 +297,8 @@ def _summarize(question: str, sql: str, df: pd.DataFrame) -> dict:
 2. Bu veriyle cevaplanabilecek 3 kısa takip sorusu öner.
 SADECE şu JSON biçiminde cevap ver: {"answer": "...", "suggestions": ["...", "...", "..."]}"""
     user = f"Soru: {question}\n\nSQL:\n{sql}\n\nSonuç ({len(df)} satır, ilk 15 satır):\n{preview}"
-    raw = llm.chat([{"role": "system", "content": system}, {"role": "user", "content": user}], json_mode=True)
+    raw = llm.chat([{"role": "system", "content": system}, {"role": "user", "content": user}], json_mode=True,
+                   think=False)
     try:
         parsed = json.loads(raw)
         if not isinstance(parsed, dict):

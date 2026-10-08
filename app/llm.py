@@ -71,7 +71,8 @@ def embed(texts: List[str], batch_size: int = 16) -> np.ndarray:
     return matrix / norms
 
 
-def _payload(messages: list, stream: bool, json_mode: bool, temperature: float, model: Optional[str] = None) -> dict:
+def _payload(messages: list, stream: bool, json_mode: bool, temperature: float, model: Optional[str] = None,
+             think: Optional[bool] = None) -> dict:
     payload = {
         "model": model or config.CHAT_MODEL,
         "messages": messages,
@@ -80,8 +81,10 @@ def _payload(messages: list, stream: bool, json_mode: bool, temperature: float, 
     }
     if json_mode:
         payload["format"] = "json"
-    if config.LLM_DISABLE_THINKING and _think_supported:
-        payload["think"] = False
+    # think=None → genel ayar (LLM_DISABLE_THINKING); True/False → bu çağrı için zorla.
+    wanted = (not config.LLM_DISABLE_THINKING) if think is None else think
+    if _think_supported and (not wanted or think is True):
+        payload["think"] = wanted
     return payload
 
 
@@ -89,15 +92,18 @@ def _is_think_rejection(response: httpx.Response) -> bool:
     return response.status_code == 400 and "think" in response.text.lower()
 
 
-def chat(messages: list, json_mode: bool = False, temperature: float = 0.2, model: Optional[str] = None) -> str:
-    """Cevabın tamamını tek seferde döner. `model` verilmezse ayarlardaki sohbet modeli kullanılır."""
+def chat(messages: list, json_mode: bool = False, temperature: float = 0.2, model: Optional[str] = None,
+         think: Optional[bool] = None) -> str:
+    """Cevabın tamamını tek seferde döner. `model` verilmezse ayarlardaki sohbet modeli kullanılır.
+    `think=False`: yönlendirme gibi basit adımlarda modelin "düşünme" aşaması, genel ayar ne olursa olsun
+    kapalı tutulur (cevap birkaç kat hızlı gelir, bu adımlarda doğruluğa katkısı yoktur)."""
     global _think_supported
     try:
         with _client() as client:
-            response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature, model))
+            response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature, model, think))
             if _is_think_rejection(response):
                 _think_supported = False
-                response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature, model))
+                response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature, model, think))
             _raise_for(response, model or config.CHAT_MODEL)
             content = response.json()["message"]["content"]
     except httpx.TransportError as e:

@@ -195,3 +195,24 @@ def test_chart_drops_series_with_very_different_scale():
     assert [s["name"] for s in chart["series"]] == ["tutar"]
     similar = pd.DataFrame({"ay": ["1", "2"], "gelir": [100, 120], "gider": [80, 90]})
     assert [s["name"] for s in tabular.infer_chart(similar, "bar", "")["series"]] == ["gelir", "gider"]
+
+
+def test_simple_steps_never_think_even_if_thinking_enabled(client, ollama, monkeypatch):
+    from app import config
+    _setup_both(client)
+    monkeypatch.setattr(config, "LLM_DISABLE_THINKING", False)  # biri genel olarak düşünmeyi açtı
+    ask(client, "Ürünlere göre toplam satış nedir?")
+    router = [r for r in ollama.chat_requests if "VERI ya da DOKUMAN" in r["messages"][-1]["content"]][-1]
+    summary = [r for r in ollama.chat_requests if r.get("format") == "json"][-1]
+    sql = [r for r in ollama.chat_requests if "SQLite uzmanısın" in r["messages"][0]["content"]][-1]
+    assert router["think"] is False and summary["think"] is False
+    assert "think" not in sql  # karmaşık adım: genel ayara (model varsayılanına) bırakıldı
+
+
+def test_default_settings_send_same_requests_as_before(client, ollama):
+    # Varsayılan ayarlarla (düşünme kapalı) bütün çağrılar eskisi gibi think=false gönderir;
+    # yani önceki ölçümler bu değişiklikle aynen geçerli.
+    _setup_both(client)
+    ask(client, "Ürünlere göre toplam satış nedir?")
+    ask(client, "Kahvenin kökeni nedir?")
+    assert ollama.chat_requests and all(r.get("think") is False for r in ollama.chat_requests)
