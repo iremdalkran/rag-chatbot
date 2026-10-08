@@ -236,8 +236,13 @@ def run(question_file: Path, files_dir: Path, output_dir: Path, judge_model: str
             status = "HATA" if reply["error"] else puanlama.MODE_LABEL.get(mode, "—")
             log(f"   [{n}/{len(questions)}] {reply['seconds']:>6.1f} sn  {status:<8} {q.text[:70]}")
 
-    # 2. aşama: puanla.
-    log(f"\n⚖️  Cevaplar puanlanıyor (hakem: {judge_model})…")
+    # 2. aşama: puanla. Hakem farklı (genelde daha büyük) bir modelse, önce cevap veren modeli
+    # bellekten boşaltıyoruz ki ikisi birden belleğe sığmaya çalışmasın.
+    if judge_model != config.CHAT_MODEL:
+        llm.unload(config.CHAT_MODEL)
+        log(f"\n⚖️  Cevaplar puanlanıyor (hakem: {judge_model}; ilk yükleme bir dakikayı bulabilir)…")
+    else:
+        log(f"\n⚖️  Cevaplar puanlanıyor (hakem: {judge_model})…")
     results = []
     for n, (q, reply) in enumerate(zip(questions, replies), start=1):
         message = reply["message"]
