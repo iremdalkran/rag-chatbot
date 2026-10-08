@@ -588,7 +588,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 65 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 71 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
