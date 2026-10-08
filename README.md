@@ -87,6 +87,15 @@ Raporda her soru için şunlar bulunur:
 Raporun "Ayarlar" sayfasında, ölçümün hangi model ve ayarlarla yapıldığı yazar. Bir ayarı değiştirmeden
 önce ve sonra aynı soru dosyasıyla çalıştırıp raporları karşılaştırabilirsiniz.
 
+**Hangi ayar daha iyi?** Parça boyutu, bulunan parça sayısı ve cevap modeli için farklı değerleri
+otomatik deneyip tek bir tabloda karşılaştırmak için:
+
+```bash
+bash ayar_karsilastir.sh ornekler/degerlendirme/sorular.xlsx
+```
+
+Bu işlem 30-60 dakika sürer. Sonunda önerilen ayarları `.env` dosyasına yazılacak şekilde gösterir.
+
 Ayrıntılar: [ARCHITECTURE.md](ARCHITECTURE.md#10-cevap-kalitesi-değerlendirmesi)
 
 ## Yedekleme

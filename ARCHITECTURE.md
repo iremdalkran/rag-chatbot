@@ -588,7 +588,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 65 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 71 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
@@ -681,11 +681,45 @@ Raporun **Ayarlar** sayfasında şunlar yazar:
 Böylece "model değiştirince ne oldu?" ya da "parça boyutunu küçültünce arama iyileşti mi?" gibi
 sorular, iki raporu yan yana koyarak cevaplanabilir.
 
+### Ayar karşılaştırması (`ayar_karsilastir.sh`)
+Değerlendirmeyi, **her seferinde tek bir ayarı değiştirerek** art arda çalıştırır. Sonuçları tek bir
+tabloda (`karsilastirma.xlsx`) toplar.
+
+| Ayar | Varsayılan denemeler | Neyi etkiler? |
+|---|---|---|
+| Parça boyutu (`CHUNK_CHARS`) | 600, 1200, 2000 karakter | Küçük parça: daha isabetli arama ama daha az bağlam. Büyük parça: daha çok bağlam ama model daha çok okur ve yavaşlar. |
+| Bulunan parça sayısı (`RETRIEVAL_TOP_K`) | 3, 6, 10 | Az: hızlı ama doğru parçayı kaçırabilir. Çok: daha güvenli ama yavaş, ilgisiz metin de karışabilir. |
+| Cevap modeli (`CHAT_MODEL`) | qwen3:8b, qwen3:14b | Küçük model: hızlı. Büyük model: daha isabetli. |
+
+- **Temel deneme**, mevcut ayarlarla (`.env`) yapılır. Diğer her deneme temelden yalnızca bir ayarla
+  ayrılır. Böylece bir fark çıkarsa nedeni bellidir.
+- **Her denemede aynı hakem** (varsayılan `qwen3:30b-a3b`) kullanılır. Aksi hâlde puanlar
+  karşılaştırılamaz.
+- **Her deneme temiz bir veri klasörüyle başlar.** Parça boyutu değişince dokümanlar yeniden işlenir.
+- **Seçim kuralı:** Her ayar için önce doğruluğa bakılır. Doğrulukları en iyiye bir soru
+  mesafesinde olanlar arasından, algılanan beklemesi en kısa olan seçilir. Bir soruluk fark gürültü
+  sayılır.
+- **Birleşim doğrulaması:** Ayrı ayrı en iyi çıkan değerlerin birleşimi daha önce denenmemişse, o
+  birleşim de ayrıca çalıştırılır. Ayarlar birbirini etkileyebildiği için bu gerekli.
+- `--tekrar 2` her denemeyi iki kez çalıştırıp ortalamasını alır. Modelin cevaplarındaki
+  rastlantısallığı azaltır, ama süre iki katına çıkar.
+
+Örnek soru seti bu karşılaştırma için zorlaştırıldı: 24 soru. Eklenen sorular şunlar:
+- Dokümandaki kelimeleri kullanmayan sorular ("tatil hakkım").
+- Kuralı uygulamayı ya da küçük bir hesabı gerektiren sorular ("7 yıldır çalışıyorum",
+  "2 gecelik konaklama").
+- Yönlendirmeyi şaşırtabilecek bir soru: "Ankara" bir bölge adı olarak tabloda da geçiyor.
+- Dokümandakine çok benzeyen ama cevabı dokümanda olmayan sorular ("yurt **dışı** konaklama
+  sınırı").
+
+Kolay sorularda bütün ayarlar %100 verdiği için karşılaştırma ancak bu zor sorularla anlamlı olur.
+
 ### Dosyalar
 | Dosya | Görevi |
 |---|---|
+| `degerlendirme/karsilastir.py`, `ayar_karsilastir.sh` | Ayar karşılaştırması. |
 | `degerlendirme/sablon.xlsx` | Boş soru şablonu. "Soru türü" sütununda açılır liste ve "Nasıl doldurulur" sayfası var. |
-| `ornekler/degerlendirme/` | Hemen denenebilecek örnek set: 3 sayfalık örnek bir personel yönetmeliği, kahve tarihi PDF'i, satış Excel'i ve 14 soru. |
+| `ornekler/degerlendirme/` | Hemen denenebilecek örnek set: 3 sayfalık örnek bir personel yönetmeliği, kahve tarihi PDF'i, satış Excel'i ve 24 soru. |
 | `degerlendirme/calistir.py` | Uygulamayı başlatır, dosyaları yükler, soruları sorar. |
 | `degerlendirme/puanlama.py` | Hakem, sayı, yol ve kaynak kontrolleri. |
 | `degerlendirme/rapor.py` | Excel raporunu yazar. |

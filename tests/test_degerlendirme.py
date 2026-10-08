@@ -86,7 +86,7 @@ def test_full_run_on_example_set_writes_report(ollama, tmp_path):
     results = wb["Sonuçlar"]
     header = [c.value for c in results[1]]
     rows = [dict(zip(header, [c.value for c in row])) for row in results.iter_rows(min_row=2)]
-    assert len(rows) == 14
+    assert len(rows) == 24
     assert {r["Karar"] for r in rows} == {"Doğru"}
     by_question = {r["Soru"]: r for r in rows}
     total = by_question["Toplam satış tutarı ne kadar?"]
@@ -108,7 +108,7 @@ def test_full_run_on_example_set_writes_report(ollama, tmp_path):
     assert "sorular.xlsx" not in files
 
     summary = {row[0].value: row[1].value for row in wb["Özet"].iter_rows(min_row=4, max_row=12)}
-    assert summary["Toplam soru"] == 14 and summary["Genel doğruluk puanı"] == "%100"
+    assert summary["Toplam soru"] == 24 and summary["Genel doğruluk puanı"] == "%100"
     # "dokümanda olmayan" sorularda hakeme beklenen cevabın olmadığı söylenmeli.
     none_prompt = [r for r in ollama.judge_requests if "net kârı" in r["messages"][1]["content"]][0]
     assert "dokümanda olmayan" in none_prompt["messages"][1]["content"]
@@ -146,3 +146,79 @@ def test_separate_judge_model_unloads_chat_model_first(ollama, tmp_path):
     assert {model for step, model in ollama.order if step == "judge"} == {"qwen3:30b-a3b"}
     settings = {row[0].value: row[1].value for row in load_workbook(report)["Ayarlar"].iter_rows(min_row=2) if row[0].value}
     assert settings["Hakem modeli"] == "qwen3:30b-a3b (boyut: 30.5B, nicemleme: Q4_K_M)"
+
+
+# --- Ayar karşılaştırması ---
+
+from degerlendirme import karsilastir  # noqa: E402
+
+
+def test_variants_change_one_setting_at_a_time():
+    base = {"model": "qwen3:14b", "chunk": 1200, "top_k": 6}
+    variants = karsilastir._variants(base, [600, 1200, 2000], [3, 6, 10], ["qwen3:8b", "qwen3:14b"])
+    assert [v["name"] for v in variants] == ["temel", "parca-600", "parca-2000", "topk-3", "topk-10", "model-qwen3-8b"]
+    for v in variants[1:]:
+        differences = [k for k in base if v[k] != base[k]]
+        assert len(differences) == 1
+
+
+def _row(name, factor, score, wait, **cfg):
+    return {"name": name, "factor": factor, "score": score, "wait": wait,
+            "model": cfg.get("model", "qwen3:14b"), "chunk": cfg.get("chunk", 1200), "top_k": cfg.get("top_k", 6)}
+
+
+def test_recommendation_prefers_accuracy_then_speed():
+    rows = [
+        _row("temel", None, 0.90, 8.0),
+        _row("parca-600", "chunk", 0.92, 6.0, chunk=600),      # daha hızlı ama en iyiden bir sorudan fazla geride
+        _row("parca-2000", "chunk", 0.97, 12.0, chunk=2000),   # en doğru → doğruluk hızdan önce gelir
+        _row("topk-3", "top_k", 0.70, 4.0, top_k=3),           # hızlı ama çok kötü → seçilmez
+        _row("model-qwen3-8b", "model", 0.88, 5.0, model="qwen3:8b"),  # bir soruluk fark içinde, daha hızlı
+    ]
+    choice = karsilastir.recommend(rows, question_count=24)
+    assert choice["chunk"] == 2000 and choice["top_k"] == 6 and choice["model"] == "qwen3:8b"
+    # Sonuç denemelerin sırasına bağlı olmamalı.
+    assert karsilastir.recommend(list(reversed(rows[1:])) + rows[:1], 24)["chunk"] == 2000
+    # Doğruluklar bir soru içindeyse en hızlısı kazanır.
+    close = [_row("temel", None, 0.90, 8.0), _row("parca-600", "chunk", 0.92, 6.0, chunk=600),
+             _row("parca-2000", "chunk", 0.93, 12.0, chunk=2000)]
+    assert karsilastir.recommend(close, 24)["chunk"] == 600
+
+
+def test_comparison_runs_variants_and_verifies_combination(ollama, tmp_path):
+    from app import config
+    before = (config.CHAT_MODEL, config.CHUNK_CHARS, config.RETRIEVAL_TOP_K)
+    result = karsilastir.run_comparison(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, "qwen3:30b-a3b",
+                                        chunk_sizes=[600, 1200], top_ks=[6], models=["qwen3:8b", "qwen3:14b"],
+                                        limit=3, log=lambda *_: None)
+    names = [r["name"] for r in result["rows"]]
+    assert names[:3] == ["temel", "parca-600", "model-qwen3-8b"]
+    assert "qwen3:8b" in ollama.pulled  # eksik model indirildi
+    # Her denemede doğru model kullanıldı ve hakem hep aynıydı.
+    asked_models = {m for step, m in ollama.order if step == "ask"}
+    assert asked_models == {"qwen3:14b", "qwen3:8b"}
+    assert {m for step, m in ollama.order if step == "judge"} == {"qwen3:30b-a3b"}
+    # Parça boyutu gerçekten değişti: küçük parçalarla daha çok parça oluşur.
+    by_name = {r["name"]: r for r in result["rows"]}
+    assert by_name["parca-600"]["chunk_count"] > by_name["temel"]["chunk_count"]
+    # Ayarlar eski hâline döndü.
+    assert (config.CHAT_MODEL, config.CHUNK_CHARS, config.RETRIEVAL_TOP_K) == before
+
+    wb = load_workbook(result["path"])
+    ws = wb["Karşılaştırma"]
+    header = [c.value for c in ws[4]]
+    assert header[:7] == ["Deneme", "Değişen ayar", "Cevap modeli", "Parça boyutu", "Top-k", "Parça sayısı", "Doğruluk"]
+    table_names = [ws.cell(row=r, column=1).value for r in range(5, 5 + len(result["rows"]))]
+    assert table_names == names
+    assert any(str(c.value or "").startswith("CHAT_MODEL=") for row in ws.iter_rows() for c in row)
+    assert len(list(result["path"].parent.glob("rapor_*.xlsx"))) == len(result["rows"])
+
+
+def test_comparison_stops_when_disk_is_too_small(ollama, tmp_path, monkeypatch):
+    from collections import namedtuple
+    from degerlendirme.calistir import EvaluationError
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(karsilastir.shutil, "disk_usage", lambda p: usage(0, 0, 2 * 1024 ** 3))
+    with pytest.raises(EvaluationError, match="GB yer istiyor"):
+        karsilastir.run_comparison(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, "qwen3:30b-a3b",
+                                   [1200], [6], ["qwen3:8b"], limit=1, log=lambda *_: None)

@@ -92,6 +92,9 @@ def summarize(results: List[dict]) -> dict:
     summary["median_seconds"] = _sec(seconds, statistics.median)
     summary["max_seconds"] = _sec(seconds, max)
     summary["avg_first"] = _sec([r["first_token_seconds"] for r in results], statistics.mean)
+    # Algılanan bekleme: cevap akıyorsa ilk kelimeye kadar, akmıyorsa (Excel) tamamına kadar geçen süre.
+    waits = [r["first_token_seconds"] if r["first_token_seconds"] is not None else r["seconds"] for r in results]
+    summary["avg_wait"] = _sec(waits, statistics.mean)
     summary["errors"] = sum(r["verdict"] == VERDICT_ERROR for r in results)
     return summary
 
@@ -121,6 +124,7 @@ def write_report(path: Path, results: List[dict], settings: List[tuple], files: 
         ("Ortanca süre (sn)", summary["median_seconds"]),
         ("En uzun süre (sn)", summary["max_seconds"]),
         ("Ortalama ilk kelime süresi (sn)", summary["avg_first"]),
+        ("Ortalama algılanan bekleme (sn)", summary["avg_wait"]),
         ("Sohbet modeli", dict(settings).get("Sohbet modeli", "")),
         ("Hakem modeli", dict(settings).get("Hakem modeli", "")),
     ]
@@ -152,6 +156,8 @@ def write_report(path: Path, results: List[dict], settings: List[tuple], files: 
         "doğru tabloyu kullandı mı?",
         "• Sayılar tuttu: beklenen cevaptaki her sayı sistemin cevabında/tablosunda geçiyor mu? (modelden "
         "bağımsız, kurallı kontrol)",
+        "• Algılanan bekleme: kullanıcının ekranda bir şey görene kadar beklediği süre (doküman sorularında "
+        "ilk kelime, Excel sorularında cevabın tamamı).",
         "• Hakem de bir yapay zekâ modelidir ve yanılabilir. Şüpheli satırları 'Sonuçlar' sayfasında gözle "
         "kontrol edin. Hakem, sohbet modeliyle aynıysa kendi cevaplarına karşı hoşgörülü olabilir.",
     ]
