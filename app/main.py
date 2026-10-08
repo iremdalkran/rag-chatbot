@@ -250,7 +250,7 @@ def _choose_mode(user: dict, question: str, requested: str, has_docs: bool, has_
         f"Soru: {question}"
     )
     try:
-        decision = llm.chat([{"role": "user", "content": prompt}], temperature=0.0).upper()
+        decision = llm.chat([{"role": "user", "content": prompt}], temperature=0.0, think=False).upper()
     except llm.LLMError:
         q = question.lower()
         return "data" if any(h in q for h in _DATA_HINTS) else "docs"
