@@ -196,6 +196,15 @@ def health() -> dict:
     return result
 
 
+def unload(model: str) -> None:
+    """Modeli Ollama'nın belleğinden hemen boşaltır (yer açmak için). Hata olursa sessizce geçer."""
+    try:
+        with _client(timeout=60) as client:
+            client.post("/api/generate", json={"model": model, "keep_alive": 0})
+    except httpx.HTTPError:
+        pass
+
+
 def server_info() -> dict:
     """Değerlendirme raporu için: Ollama sürümü ve yüklü modellerin ayrıntıları (boyut, nicemleme)."""
     info = {"version": None, "models": {}}

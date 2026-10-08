@@ -660,6 +660,12 @@ model kullanılabilir:
 bash degerlendir.sh sorular.xlsx --hakem-model qwen3:30b-a3b
 ```
 
+Hakem modeli bilgisayarda yoksa `degerlendir.sh` önce disk yerini kontrol eder, sonra modeli kendisi
+indirir. Bu sadece ilk seferde olur; `qwen3:30b-a3b` yaklaşık 19 GB'tır. Sorular bittikten sonra cevap
+veren model bellekten boşaltılır, ardından hakem yüklenir. Böylece 24 GB'lık bir Mac'te iki büyük model
+aynı anda belleğe sığmaya çalışmaz. Hakem modeli ekran kartı belleğine tam sığmazsa bir kısmı işlemcide
+çalışır. Puanlama biraz yavaşlar ama sonucu etkilemez.
+
 Hakem de yanılabilir. Bu yüzden "Sayılar tuttu" kontrolü ve rapordaki "Hakemin gerekçesi" sütunu,
 şüpheli satırları gözle kontrol etmeyi kolaylaştırır.
 

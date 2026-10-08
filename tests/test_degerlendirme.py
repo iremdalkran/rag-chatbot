@@ -134,3 +134,15 @@ def test_all_questions_are_asked_before_any_judging(ollama, tmp_path):
              for r in ollama.chat_requests]
     first_judge = kinds.index("judge")
     assert "ask" not in kinds[first_judge:] and kinds.count("judge") == 4
+
+
+def test_separate_judge_model_unloads_chat_model_first(ollama, tmp_path):
+    report = run(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, judge_model="qwen3:30b-a3b", limit=3,
+                 log=lambda *_: None)
+    steps = [step for step, _ in ollama.order]
+    unload_at = steps.index("unload")
+    assert ollama.order[unload_at] == ("unload", "qwen3:14b")
+    assert "judge" not in steps[:unload_at] and "ask" not in steps[unload_at:]
+    assert {model for step, model in ollama.order if step == "judge"} == {"qwen3:30b-a3b"}
+    settings = {row[0].value: row[1].value for row in load_workbook(report)["Ayarlar"].iter_rows(min_row=2) if row[0].value}
+    assert settings["Hakem modeli"] == "qwen3:30b-a3b (boyut: 30.5B, nicemleme: Q4_K_M)"

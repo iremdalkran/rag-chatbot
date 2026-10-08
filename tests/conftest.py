@@ -38,6 +38,7 @@ class FakeOllama:
         self.chat_requests = []
         self.judge_requests = []
         self.judge_verdict = "dogru"
+        self.order = []
         self.down = False
 
     def reply(self, payload: dict) -> str:
@@ -60,8 +61,13 @@ class FakeOllama:
         payload = json.loads(request.content or b"{}")
         if request.url.path == "/api/embed":
             return httpx.Response(200, json={"embeddings": [fake_vector(t) for t in payload["input"]]})
+        if request.url.path == "/api/generate" and payload.get("keep_alive") == 0:
+            self.order.append(("unload", payload["model"]))
+            return httpx.Response(200, json={"done": True})
         if request.url.path == "/api/chat":
             self.chat_requests.append(payload)
+            judging = "tarafsız bir hakemsin" in payload["messages"][0]["content"]
+            self.order.append(("judge" if judging else "ask", payload["model"]))
             text = self.reply(payload)
             if not payload.get("stream"):
                 return httpx.Response(200, json={"message": {"role": "assistant", "content": text}, "done": True})
@@ -73,7 +79,8 @@ class FakeOllama:
             return httpx.Response(200, json={"models": [
                 {"name": "qwen3:14b", "digest": "abc123def4567890",
                  "details": {"parameter_size": "14.8B", "quantization_level": "Q4_K_M"}},
-                {"name": "bge-m3:latest", "details": {"parameter_size": "567M", "quantization_level": "F16"}}]})
+                {"name": "bge-m3:latest", "details": {"parameter_size": "567M", "quantization_level": "F16"}},
+                {"name": "qwen3:30b-a3b", "details": {"parameter_size": "30.5B", "quantization_level": "Q4_K_M"}}]})
         if request.url.path == "/api/version":
             return httpx.Response(200, json={"version": "0.40.0"})
         return httpx.Response(404, json={"error": "not found"})
