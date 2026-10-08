@@ -289,6 +289,9 @@ def run_comparison(question_file: Path, files_dir: Path, output_dir: Path, judge
             log(f"   doğruluk {_pct(s['score'])} · algılanan bekleme {s['avg_wait']} sn · "
                 f"hazırlık {outcome['prep_seconds']} sn · parça {chunk_count}"
                 + (f" · bölüm {node_count}" if variant["method"] == "pageindex" else ""))
+            if outcome.get("judge_problems"):
+                problems = outcome["judge_problems"]
+                log(f"   ⚠️  Hakem {len(problems)} soruyu puanlayamadı (0 puan sayıldı). İlk neden: {problems[0]}")
         return _row(variant, {"chunk_count": chunk_count, "reports": reports, "prep": prep,
                               "node_count": node_count}, summaries)
 

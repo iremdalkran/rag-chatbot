@@ -97,6 +97,13 @@ def chat(messages: list, json_mode: bool = False, temperature: float = 0.2, mode
     """Cevabın tamamını tek seferde döner. `model` verilmezse ayarlardaki sohbet modeli kullanılır.
     `think=False`: yönlendirme gibi basit adımlarda modelin "düşünme" aşaması, genel ayar ne olursa olsun
     kapalı tutulur (cevap birkaç kat hızlı gelir, bu adımlarda doğruluğa katkısı yoktur)."""
+    return chat_full(messages, json_mode, temperature, model, think)["content"]
+
+
+def chat_full(messages: list, json_mode: bool = False, temperature: float = 0.2, model: Optional[str] = None,
+              think: Optional[bool] = None) -> dict:
+    """chat() gibi, ama teşhis için ayrıntıları da döner: content, thinking (modelin düşünme metni,
+    varsa) ve done_reason (Ollama'nın cevabı neden bitirdiği)."""
     global _think_supported
     try:
         with _client() as client:
@@ -105,10 +112,13 @@ def chat(messages: list, json_mode: bool = False, temperature: float = 0.2, mode
                 _think_supported = False
                 response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature, model, think))
             _raise_for(response, model or config.CHAT_MODEL)
-            content = response.json()["message"]["content"]
+            data = response.json()
     except httpx.TransportError as e:
         raise _connection_error() from e
-    return _THINK_RE.sub("", content).strip()
+    message = data.get("message") or {}
+    return {"content": _THINK_RE.sub("", message.get("content") or "").strip(),
+            "thinking": (message.get("thinking") or "").strip(),
+            "done_reason": data.get("done_reason")}
 
 
 def chat_stream(messages: list, temperature: float = 0.2) -> Iterator[str]:

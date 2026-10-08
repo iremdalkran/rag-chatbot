@@ -277,3 +277,35 @@ def test_is_kanunu_questions_get_pages_from_law_text(tmp_path, monkeypatch):
     assert weekly.source_file == "is_kanunu.pdf" and weekly.source_pages == {21}  # Madde 63 → 21. sayfa
     assert sum(q.kind == "dokümanda olmayan" for q in questions) == 3
     assert any("Madde 53" in m for m in messages) and not any("Madde 63" in m for m in messages)
+
+
+# --- Hakem boş cevap verirse ---
+
+def test_judge_retries_without_json_mode_when_answer_is_empty(ollama):
+    from degerlendirme import puanlama
+    from degerlendirme.sorular import Question
+    q = Question(2, "Soru?", "45 saat", "a.pdf", {1}, "doküman")
+    ollama.judge_empty = "json"  # katı JSON modunda boş dönüyor (Mac'te görülen durum)
+    assert puanlama.judge(q, "45 saattir.", None, "qwen3:30b-a3b") == ("Doğru", "test gerekçesi")
+    assert [r.get("format") for r in ollama.judge_requests] == ["json", None]
+    assert all(r["think"] is False for r in ollama.judge_requests)
+
+    ollama.judge_empty = "always"
+    verdict, reason = puanlama.judge(q, "45 saattir.", None, "qwen3:30b-a3b")
+    assert verdict == "Belirsiz" and "boş cevap" in reason
+
+
+def test_verdict_is_read_from_plain_text():
+    from degerlendirme.puanlama import _parse_verdict
+    assert _parse_verdict('Tamam. {"karar": "kısmen", "gerekce": "eksik"}') == ("Kısmen", "eksik")
+    assert _parse_verdict("Karar: YANLIŞ — sayı tutmuyor")[0] == "Yanlış"
+    assert _parse_verdict("") is None and _parse_verdict("emin değilim") is None
+
+
+def test_unscored_questions_are_reported_on_screen(ollama, tmp_path):
+    from degerlendirme.calistir import run_evaluation
+    ollama.judge_empty = "always"
+    lines = []
+    outcome = run_evaluation(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, "qwen3:30b-a3b", limit=2, log=lines.append)
+    assert len(outcome["judge_problems"]) == 2
+    assert any("Hakem 2 soruyu puanlayamadı" in line for line in lines)

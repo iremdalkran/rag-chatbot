@@ -163,21 +163,51 @@ def judge(question: Question, answer: str, table: Optional[dict], model: Optiona
     if preview:
         parts.append(f"Sistemin cevabıyla birlikte gösterdiği sonuç tablosu (ilk satırlar):\n{preview}")
     messages = [{"role": "system", "content": JUDGE_SYSTEM}, {"role": "user", "content": "\n\n".join(parts)}]
+    # Bazı model/Ollama sürümü birleşimleri katı JSON modunda BOŞ cevap döndürebiliyor. O zaman aynı soruyu
+    # JSON modu olmadan tekrar sorar ve kararı düz metinden okuruz.
+    attempts = []
+    for json_mode in (True, False):
+        try:
+            result = llm.chat_full(messages, json_mode=json_mode, temperature=0.0, model=model, think=False)
+        except llm.LLMError as e:
+            return VERDICT_UNCLEAR, f"Hakem çalışamadı: {e}"
+        attempts.append(result)
+        parsed = _parse_verdict(result["content"])
+        if parsed:
+            return parsed
+    # İki deneme de okunamadı: kararı modelin düşünme metninde arar, yoksa nedenini rapora yazar.
+    parsed = _parse_verdict(attempts[-1]["thinking"])
+    if parsed:
+        return parsed
+    last = attempts[-1]
+    if not last["content"]:
+        return VERDICT_UNCLEAR, (f"Hakem boş cevap verdi (bitiş nedeni: {last['done_reason'] or 'bilinmiyor'}, "
+                                 f"düşünme metni: {len(last['thinking'])} karakter)")
+    return VERDICT_UNCLEAR, f"Hakemin cevabı anlaşılamadı: {last['content'][:200]}"
+
+
+_VERDICT_RE = re.compile(r"\b(dogru|kismen|yanlis)\b")
+_VERDICTS = {"dogru": VERDICT_CORRECT, "kismen": VERDICT_PARTIAL, "yanlis": VERDICT_WRONG}
+
+
+def _parse_verdict(text: str) -> Optional[tuple]:
+    """Hakem cevabından (karar, gerekçe) çıkarır: önce JSON, olmazsa metindeki karar kelimesi."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    reason = ""
     try:
-        raw = llm.chat(messages, json_mode=True, temperature=0.0, model=model)
-    except llm.LLMError as e:
-        return VERDICT_UNCLEAR, f"Hakem çalışamadı: {e}"
-    try:
-        data = json.loads(raw)
+        data = json.loads(text[text.find("{"):text.rfind("}") + 1]) if "{" in text else None
+    except ValueError:
+        data = None
+    if isinstance(data, dict):
         verdict = str(data.get("karar", "")).strip().lower()
         reason = str(data.get("gerekce", "")).strip()
-    except (ValueError, AttributeError):
-        verdict, reason = raw.strip().lower(), ""
-    verdict = verdict.translate(str.maketrans("ğıüşöç", "giusoc"))
-    if verdict.startswith("dogru"):
-        return VERDICT_CORRECT, reason
-    if verdict.startswith("kismen"):
-        return VERDICT_PARTIAL, reason
-    if verdict.startswith("yanlis"):
-        return VERDICT_WRONG, reason
-    return VERDICT_UNCLEAR, reason or f"Hakemin cevabı anlaşılamadı: {raw[:200]}"
+    else:
+        verdict = text.lower()
+    verdict = verdict.translate(str.maketrans("ğıüşöçİ", "giusoci"))
+    # JSON'daki "karar" alanı ya da düz metinde "karar: ..." kısmı önceliklidir.
+    match = re.search(r"karar\W*(dogru|kismen|yanlis)", verdict) or _VERDICT_RE.search(verdict)
+    if not match:
+        return None
+    return _VERDICTS[match.group(1)], reason
