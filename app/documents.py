@@ -56,6 +56,7 @@ def _row_to_doc(row, user: dict) -> dict:
         # PageIndex içindekiler ağacının durumu: none | pending | processing | ready | error
         "tree_status": row["tree_status"],
         "tree_error": row["tree_error"],
+        "tree_origin": pageindex.tree_origin(row["tree_json"]) if row["tree_status"] == "ready" else None,
         "tree_nodes": pageindex.node_count(row["tree_json"]) if row["tree_status"] == "ready" else 0,
         "can_delete": row["owner_id"] == user["id"] or (bool(row["shared"]) and user["is_admin"]),
     }
