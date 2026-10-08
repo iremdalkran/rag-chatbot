@@ -154,9 +154,11 @@ from degerlendirme import karsilastir  # noqa: E402
 
 
 def test_variants_change_one_setting_at_a_time():
-    base = {"model": "qwen3:14b", "chunk": 1200, "top_k": 6}
-    variants = karsilastir._variants(base, [600, 1200, 2000], [3, 6, 10], ["qwen3:8b", "qwen3:14b"])
-    assert [v["name"] for v in variants] == ["temel", "parca-600", "parca-2000", "topk-3", "topk-10", "model-qwen3-8b"]
+    base = {"model": "qwen3:14b", "chunk": 1200, "top_k": 6, "method": "vector"}
+    variants = karsilastir._variants(base, [600, 1200, 2000], [3, 6, 10], ["qwen3:8b", "qwen3:14b"],
+                                     ["vector", "pageindex"])
+    assert [v["name"] for v in variants] == ["temel", "parca-600", "parca-2000", "topk-3", "topk-10", "model-qwen3-8b",
+                                             "yontem-pageindex"]
     for v in variants[1:]:
         differences = [k for k in base if v[k] != base[k]]
         assert len(differences) == 1
@@ -164,7 +166,8 @@ def test_variants_change_one_setting_at_a_time():
 
 def _row(name, factor, score, wait, **cfg):
     return {"name": name, "factor": factor, "score": score, "wait": wait,
-            "model": cfg.get("model", "qwen3:14b"), "chunk": cfg.get("chunk", 1200), "top_k": cfg.get("top_k", 6)}
+            "model": cfg.get("model", "qwen3:14b"), "chunk": cfg.get("chunk", 1200), "top_k": cfg.get("top_k", 6),
+            "method": cfg.get("method", "vector")}
 
 
 def test_recommendation_prefers_accuracy_then_speed():
@@ -207,10 +210,11 @@ def test_comparison_runs_variants_and_verifies_combination(ollama, tmp_path):
     wb = load_workbook(result["path"])
     ws = wb["Karşılaştırma"]
     header = [c.value for c in ws[4]]
-    assert header[:7] == ["Deneme", "Değişen ayar", "Cevap modeli", "Parça boyutu", "Top-k", "Parça sayısı", "Doğruluk"]
+    assert header[:10] == ["Deneme", "Değişen ayar", "Yöntem", "Cevap modeli", "Parça boyutu", "Top-k", "Parça sayısı",
+                           "Bölüm sayısı (PageIndex)", "Hazırlık (sn)", "Doğruluk"]
     table_names = [ws.cell(row=r, column=1).value for r in range(5, 5 + len(result["rows"]))]
     assert table_names == names
-    assert any(str(c.value or "").startswith("CHAT_MODEL=") for row in ws.iter_rows() for c in row)
+    assert any(str(c.value or "").startswith("RAG_METHOD=vector") for row in ws.iter_rows() for c in row)
     assert len(list(result["path"].parent.glob("rapor_*.xlsx"))) == len(result["rows"])
 
 
@@ -222,3 +226,21 @@ def test_comparison_stops_when_disk_is_too_small(ollama, tmp_path, monkeypatch):
     with pytest.raises(EvaluationError, match="GB yer istiyor"):
         karsilastir.run_comparison(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, "qwen3:30b-a3b",
                                    [1200], [6], ["qwen3:8b"], limit=1, log=lambda *_: None)
+
+
+def test_comparison_of_vector_and_pageindex_methods(ollama, tmp_path):
+    from app import config
+    result = karsilastir.run_comparison(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, "qwen3:30b-a3b",
+                                        chunk_sizes=[1200], top_ks=[6], models=["qwen3:14b"],
+                                        methods=["vector", "pageindex"], limit=4, log=lambda *_: None)
+    by_name = {r["name"]: r for r in result["rows"]}
+    assert set(by_name) >= {"temel", "yontem-pageindex"}
+    assert by_name["temel"]["method"] == "vector" and by_name["yontem-pageindex"]["method"] == "pageindex"
+    # PageIndex denemesinde ağaçlar kuruldu ve sorular ağaç üzerinden arandı.
+    assert by_name["yontem-pageindex"]["node_count"] > 0 and by_name["temel"]["node_count"] == 0
+    assert ollama.toc_requests and ollama.tree_search_requests
+    assert by_name["yontem-pageindex"]["prep"] is not None
+    assert config.RAG_METHOD == "vector"  # ayar eski hâline döndü
+    pageindex_report = next(p for p in by_name["yontem-pageindex"]["reports"])
+    settings = {r[0]: r[1] for r in load_workbook(pageindex_report)["Ayarlar"].iter_rows(values_only=True) if r[0]}
+    assert settings["Doküman arama yöntemi (RAG_METHOD)"].startswith("PageIndex")

@@ -50,6 +50,21 @@ CHUNK_OVERLAP_CHARS = _int("CHUNK_OVERLAP_CHARS", 200)
 RETRIEVAL_TOP_K = _int("RETRIEVAL_TOP_K", 6)
 HISTORY_MESSAGES = _int("HISTORY_MESSAGES", 6)
 
+# --- Doküman arama yöntemi ---
+# "vector"    : parçalara bölme + anlam/kelime araması (varsayılan, hızlı).
+# "pageindex" : PageIndex yöntemi — her doküman için içindekiler ağacı kurulur, model soruya göre
+#               ağaçta ilgili bölümleri seçer ve o sayfaları okur (vektör yok).
+RAG_METHOD = os.getenv("RAG_METHOD", "vector").strip().lower()
+if RAG_METHOD not in ("vector", "pageindex"):
+    RAG_METHOD = "vector"
+# Ağaç ne zaman kurulsun? "auto": sadece RAG_METHOD=pageindex iken. "always": her yüklemede.
+PAGEINDEX_BUILD = os.getenv("PAGEINDEX_BUILD", "auto").strip().lower()
+PAGEINDEX_MAX_PAGES_PER_NODE = _int("PAGEINDEX_MAX_PAGES_PER_NODE", 4)   # daha uzun bölümler bölünür
+PAGEINDEX_MAX_NODES = _int("PAGEINDEX_MAX_NODES", 4)                     # soru başına okunacak en fazla bölüm
+PAGEINDEX_MAX_CONTEXT_CHARS = _int("PAGEINDEX_MAX_CONTEXT_CHARS", 12000) # modele verilecek en fazla metin
+PAGEINDEX_GROUP_CHARS = _int("PAGEINDEX_GROUP_CHARS", 12000)             # ağaç çıkarılırken bir seferde okunan metin
+PAGEINDEX_THINK = _bool("PAGEINDEX_THINK", False)                        # ağaç aramasında "düşünme" açık mı
+
 # --- Güvenlik ---
 SESSION_DAYS = _int("SESSION_DAYS", 7)
 MIN_PASSWORD_LENGTH = _int("MIN_PASSWORD_LENGTH", 8)

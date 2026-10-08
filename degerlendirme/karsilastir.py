@@ -8,6 +8,7 @@ Denenen ayarlar (varsayılanlar, komut satırından değiştirilebilir):
   - Parça boyutu (CHUNK_CHARS):        600, 1200, 2000 karakter
   - Bulunan parça sayısı (TOP_K):       3, 6, 10
   - Cevap modeli (CHAT_MODEL):          qwen3:8b, qwen3:14b
+  - Doküman arama yöntemi (RAG_METHOD): istenirse vector ve pageindex (--yontemler vector,pageindex)
 
 "Temel" ayar, .env'deki (ya da varsayılan) mevcut ayardır. Her deneme temelden yalnızca bir
 ayarla ayrılır; böylece bir fark çıkarsa onun hangi ayardan geldiği bellidir. Sonunda her ayar
@@ -45,7 +46,10 @@ def _num(value):
         return None
 
 
-def _variants(base: dict, chunk_sizes: list, top_ks: list, models: list) -> list:
+METHOD_LABEL = {"vector": "Vektör", "pageindex": "PageIndex"}
+
+
+def _variants(base: dict, chunk_sizes: list, top_ks: list, models: list, methods: list = ()) -> list:
     """Temel + her ayar için temelden tek farkla ayrılan denemeler."""
     variants = [{"name": "temel", "factor": None, "change": "— (temel ayar)", **base}]
     for size in chunk_sizes:
@@ -60,6 +64,11 @@ def _variants(base: dict, chunk_sizes: list, top_ks: list, models: list) -> list
         if model != base["model"]:
             variants.append({"name": "model-" + model.replace(":", "-"), "factor": "model",
                              "change": f"Cevap modeli {base['model']} → {model}", **{**base, "model": model}})
+    for method in methods:
+        if method != base["method"]:
+            variants.append({"name": f"yontem-{method}", "factor": "method",
+                             "change": f"Arama yöntemi {METHOD_LABEL[base['method']]} → {METHOD_LABEL[method]}",
+                             **{**base, "method": method}})
     return variants
 
 
@@ -71,6 +80,7 @@ def _apply(variant: dict, temp_root: Path) -> None:
     config.CHAT_MODEL = variant["model"]
     config.CHUNK_CHARS = variant["chunk"]
     config.RETRIEVAL_TOP_K = variant["top_k"]
+    config.RAG_METHOD = variant["method"]
     data_dir = Path(tempfile.mkdtemp(prefix=variant["name"] + "-", dir=temp_root))
     config.DATA_DIR = data_dir
     config.DB_PATH = data_dir / "app.db"
@@ -99,7 +109,9 @@ def _row(variant: dict, outcome: dict, repeats: list) -> dict:
     return {
         "name": variant["name"], "change": variant["change"], "factor": variant["factor"],
         "model": variant["model"], "chunk": variant["chunk"], "top_k": variant["top_k"],
-        "chunk_count": outcome["chunk_count"],
+        "method": variant["method"], "chunk_count": outcome["chunk_count"],
+        "prep": statistics.mean(outcome["prep"]) if outcome.get("prep") else None,
+        "node_count": outcome.get("node_count", 0),
         "score": mean("score"),
         "score_doc": mean("score", "doküman"), "score_data": mean("score", "Excel"),
         "score_none": mean("score", "dokümanda olmayan"),
@@ -127,9 +139,10 @@ def recommend(rows: list, question_count: int) -> dict:
     tolerance = 1.0 / max(question_count, 1) + 1e-9   # en fazla bir soruluk fark "aynı" sayılır
     base = next(r for r in rows if r["name"] == "temel")
     best = {factor: _pick([base] + [r for r in rows if r["factor"] == factor], tolerance)
-            for factor in ("chunk", "top_k", "model")}
+            for factor in ("chunk", "top_k", "model", "method")}
     return {
         "model": best["model"]["model"], "chunk": best["chunk"]["chunk"], "top_k": best["top_k"]["top_k"],
+        "method": best["method"]["method"],
         "winners": best, "tolerance": tolerance,
     }
 
@@ -156,8 +169,8 @@ def write_comparison(path: Path, rows: list, choice: dict, judge: str, question_
     ws["A1"].font = Font(bold=True, size=14)
     ws["A2"] = (f"{datetime.now():%d.%m.%Y %H:%M} · soru dosyası: {question_file.name} · hakem: {judge} · "
                 f"her deneme {repeats} kez çalıştırıldı")
-    columns = [("Deneme", 22), ("Değişen ayar", 30), ("Cevap modeli", 13), ("Parça boyutu", 9), ("Top-k", 7),
-               ("Parça sayısı", 9), ("Doğruluk", 10), ("Doküman", 10), ("Excel", 9), ("Dokümanda olmayan", 11),
+    columns = [("Deneme", 22), ("Değişen ayar", 30), ("Yöntem", 11), ("Cevap modeli", 13), ("Parça boyutu", 9),
+               ("Top-k", 7), ("Parça sayısı", 9), ("Bölüm sayısı (PageIndex)", 10), ("Hazırlık (sn)", 10), ("Doğruluk", 10), ("Doküman", 10), ("Excel", 9), ("Dokümanda olmayan", 11),
                ("Aramada bulundu", 11), ("Cevapta gösterildi", 11), ("Sayılar tuttu", 10),
                ("Algılanan bekleme (sn)", 11), ("İlk kelime (sn)", 10), ("Ort. toplam süre (sn)", 11),
                ("Doğruluk farkı (temele göre)", 12), ("Bekleme farkı (sn)", 11), ("Rapor(lar)", 50)]
@@ -171,7 +184,8 @@ def write_comparison(path: Path, rows: list, choice: dict, judge: str, question_
     for i, r in enumerate(rows, start=5):
         d_score = None if r["score"] is None or base["score"] is None else (r["score"] - base["score"]) * 100
         d_wait = None if r["wait"] is None or base["wait"] is None else r["wait"] - base["wait"]
-        values = [r["name"], r["change"], r["model"], r["chunk"], r["top_k"], r["chunk_count"], _pct(r["score"]),
+        values = [r["name"], r["change"], METHOD_LABEL[r["method"]], r["model"], r["chunk"], r["top_k"],
+                  r["chunk_count"], r["node_count"] or "—", _sec(r["prep"]), _pct(r["score"]),
                   _pct(r["score_doc"]), _pct(r["score_data"]), _pct(r["score_none"]), _pct(r["retrieved"]),
                   _pct(r["cited"]), _pct(r["numbers"]), _sec(r["wait"]), _sec(r["first"]), _sec(r["total"]),
                   "—" if d_score is None or r is base else f"{d_score:+.0f} puan",
@@ -185,7 +199,8 @@ def write_comparison(path: Path, rows: list, choice: dict, judge: str, question_
 
     notes_row = 6 + len(rows)
     notes = [
-        ("Önerilen ayar", f"CHAT_MODEL={choice['model']}  ·  CHUNK_CHARS={choice['chunk']}  ·  RETRIEVAL_TOP_K={choice['top_k']}"),
+        ("Önerilen ayar", f"RAG_METHOD={choice['method']}  ·  CHAT_MODEL={choice['model']}  ·  "
+                          f"CHUNK_CHARS={choice['chunk']}  ·  RETRIEVAL_TOP_K={choice['top_k']}"),
         ("Nasıl seçildi?", "Her ayar için, o ayarın denendiği satırlar ile temel arasından: önce doğruluk; doğruluk farkı "
                            "en fazla bir soruysa (gürültü sayılır) algılanan beklemesi en kısa olan. Yeşil satırlar "
                            "seçilen değerlerdir."),
@@ -194,6 +209,10 @@ def write_comparison(path: Path, rows: list, choice: dict, judge: str, question_
         ("Dikkat", "Küçük bir soru setinde bir sorunun doğru ya da yanlış çıkması puanı birkaç puan oynatır. Bu yüzden "
                    "bir soruluk farklar 'aynı' sayıldı. Sonuç ancak soru seti kadar güvenilirdir; gerçek "
                    "dokümanlarınızdan hazırlanmış bir setle tekrar çalıştırmanız önerilir."),
+        ("Hazırlık", "Dokümanların yüklenip aranabilir hale gelmesi için geçen süre (bir kez ödenir). PageIndex'te "
+                     "buna içindekiler ağacının kurulması (başlık çıkarma + bölüm özetleri) da dahildir."),
+        ("Aramada bulundu", "Vektörde: bulunan parçalar arasında doğru sayfa var mı? PageIndex'te: modelin seçip okuduğu "
+                            "sayfalar arasında doğru sayfa var mı?"),
         ("Parça boyutu değişirse", "Mevcut dokümanların silinip yeniden yüklenmesi gerekir (parçalar yükleme anında oluşur)."),
     ]
     for i, (label, text) in enumerate(notes):
@@ -207,15 +226,16 @@ def write_comparison(path: Path, rows: list, choice: dict, judge: str, question_
 
 def run_comparison(question_file: Path, files_dir: Path, output_dir: Path, judge: str, chunk_sizes: list,
                    top_ks: list, models: list, repeats: int = 1, limit: int = None, log=print,
-                   pull_missing: bool = True) -> dict:
+                   pull_missing: bool = True, methods: list = ()) -> dict:
     from app import config, llm
 
     from .calistir import EvaluationError, run_evaluation
     from .sorular import load_questions
 
     question_count = len(load_questions(question_file)[:limit] if limit else load_questions(question_file))
-    base = {"model": config.CHAT_MODEL, "chunk": config.CHUNK_CHARS, "top_k": config.RETRIEVAL_TOP_K}
-    variants = _variants(base, chunk_sizes, top_ks, models)
+    base = {"model": config.CHAT_MODEL, "chunk": config.CHUNK_CHARS, "top_k": config.RETRIEVAL_TOP_K,
+            "method": config.RAG_METHOD}
+    variants = _variants(base, chunk_sizes, top_ks, models, methods)
     # Aynı modeli kullanan denemeler arka arkaya: model değiştirmek (bellekten çıkarıp yüklemek) zaman alır.
     variants = variants[:1] + sorted(variants[1:], key=lambda v: v["model"] != base["model"])
 
@@ -245,7 +265,7 @@ def run_comparison(question_file: Path, files_dir: Path, output_dir: Path, judge
     out_dir = output_dir / f"karsilastirma_{datetime.now():%Y-%m-%d_%H%M%S}"
     out_dir.mkdir(parents=True, exist_ok=True)
     temp_root = Path(tempfile.mkdtemp(prefix="karsilastirma-"))
-    original = (config.CHAT_MODEL, config.CHUNK_CHARS, config.RETRIEVAL_TOP_K,
+    original = (config.CHAT_MODEL, config.CHUNK_CHARS, config.RETRIEVAL_TOP_K, config.RAG_METHOD,
                 config.DATA_DIR, config.DB_PATH, config.TABLES_DIR)
     total_runs = len(variants) * repeats
     log(f"\n🔬 {len(variants)} deneme × {repeats} tekrar = {total_runs} değerlendirme, {question_count} soru, hakem: {judge}")
@@ -253,7 +273,7 @@ def run_comparison(question_file: Path, files_dir: Path, output_dir: Path, judge
         log(f"   • {v['name']:<16} {v['change']}")
 
     def evaluate(variant: dict) -> dict:
-        summaries, reports, chunk_count = [], [], 0
+        summaries, reports, chunk_count, prep, node_count = [], [], 0, [], 0
         for attempt in range(1, repeats + 1):
             log(f"\n━━ {variant['name']} ({variant['change']})" + (f" — tekrar {attempt}/{repeats}" if repeats > 1 else ""))
             _apply(variant, temp_root)
@@ -263,22 +283,27 @@ def run_comparison(question_file: Path, files_dir: Path, output_dir: Path, judge
             summaries.append(outcome["summary"])
             reports.append(outcome["report"])
             chunk_count = outcome["chunk_count"]
+            prep.append(outcome["prep_seconds"])
+            node_count = outcome["node_count"]
             s = outcome["summary"]
-            log(f"   doğruluk {_pct(s['score'])} · algılanan bekleme {s['avg_wait']} sn · parça {chunk_count}")
-        return _row(variant, {"chunk_count": chunk_count, "reports": reports}, summaries)
+            log(f"   doğruluk {_pct(s['score'])} · algılanan bekleme {s['avg_wait']} sn · "
+                f"hazırlık {outcome['prep_seconds']} sn · parça {chunk_count}"
+                + (f" · bölüm {node_count}" if variant["method"] == "pageindex" else ""))
+        return _row(variant, {"chunk_count": chunk_count, "reports": reports, "prep": prep,
+                              "node_count": node_count}, summaries)
 
     try:
         rows = [evaluate(v) for v in variants]
         choice = recommend(rows, question_count)
-        tested = {(r["model"], r["chunk"], r["top_k"]) for r in rows}
-        combo = (choice["model"], choice["chunk"], choice["top_k"])
+        tested = {(r["model"], r["chunk"], r["top_k"], r["method"]) for r in rows}
+        combo = (choice["model"], choice["chunk"], choice["top_k"], choice["method"])
         if combo not in tested:
             # Ayrı ayrı en iyi olan değerler birlikte de iyi mi? Birleşimi doğrula.
             v = {"name": "onerilen", "factor": None, "change": "Önerilen birleşim (doğrulama)",
-                 "model": combo[0], "chunk": combo[1], "top_k": combo[2]}
+                 "model": combo[0], "chunk": combo[1], "top_k": combo[2], "method": combo[3]}
             rows.append(evaluate(v))
     finally:
-        (config.CHAT_MODEL, config.CHUNK_CHARS, config.RETRIEVAL_TOP_K,
+        (config.CHAT_MODEL, config.CHUNK_CHARS, config.RETRIEVAL_TOP_K, config.RAG_METHOD,
          config.DATA_DIR, config.DB_PATH, config.TABLES_DIR) = original
         shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -286,12 +311,15 @@ def run_comparison(question_file: Path, files_dir: Path, output_dir: Path, judge
     write_comparison(path, rows, choice, judge, question_file, repeats)
 
     log("\n📊 Karşılaştırma")
-    log(f"   {'Deneme':<16} {'Model':<11} {'Parça':>5} {'Top-k':>5}  {'Doğruluk':>8}  {'Bekleme':>8}  {'Toplam':>7}")
+    log(f"   {'Deneme':<16} {'Yöntem':<9} {'Model':<11} {'Parça':>5} {'Top-k':>5}  {'Doğruluk':>8}  "
+        f"{'Doküman':>7} {'Bulundu':>7} {'Gösterildi':>10}  {'Bekleme':>8}  {'Toplam':>7}  {'Hazırlık':>8}")
     for r in rows:
         mark = "★" if r["name"] == "onerilen" or (r in choice["winners"].values() and r["name"] != "temel") else " "
-        log(f" {mark} {r['name']:<16} {r['model']:<11} {r['chunk']:>5} {r['top_k']:>5}  {_pct(r['score']):>8}  "
-            f"{_sec(r['wait']):>6} sn  {_sec(r['total']):>5} sn")
-    log(f"\n✅ Önerilen ayar:  CHAT_MODEL={choice['model']}  CHUNK_CHARS={choice['chunk']}  RETRIEVAL_TOP_K={choice['top_k']}")
+        log(f" {mark} {r['name']:<16} {METHOD_LABEL[r['method']]:<9} {r['model']:<11} {r['chunk']:>5} {r['top_k']:>5}  "
+            f"{_pct(r['score']):>8}  {_pct(r['score_doc']):>7} {_pct(r['retrieved']):>7} {_pct(r['cited']):>10}  "
+            f"{_sec(r['wait']):>6} sn  {_sec(r['total']):>5} sn  {_sec(r['prep']):>6} sn")
+    log(f"\n✅ Önerilen ayar:  RAG_METHOD={choice['method']}  CHAT_MODEL={choice['model']}  "
+        f"CHUNK_CHARS={choice['chunk']}  RETRIEVAL_TOP_K={choice['top_k']}")
     log(f"📄 Tablo: {path}")
     return {"path": path, "rows": rows, "choice": choice}
 
@@ -307,6 +335,8 @@ def main(argv=None) -> int:
     parser.add_argument("--topk", type=_floats, default=[3, 6, 10], help="Bulunan parça sayıları (ör. 3,6,10)")
     parser.add_argument("--modeller", type=lambda s: [m.strip() for m in s.split(",") if m.strip()],
                         default=["qwen3:8b", "qwen3:14b"], help="Cevap modelleri (ör. qwen3:8b,qwen3:14b)")
+    parser.add_argument("--yontemler", type=lambda s: [m.strip().lower() for m in s.split(",") if m.strip()],
+                        default=[], help="Doküman arama yöntemleri (ör. vector,pageindex)")
     parser.add_argument("--tekrar", type=int, default=1,
                         help="Her denemeyi kaç kez çalıştırıp ortalamasını al (rastlantısallığı azaltır)")
     parser.add_argument("--sadece", type=int, default=None, help="Sadece ilk N soru (hızlı deneme için)")
@@ -315,6 +345,10 @@ def main(argv=None) -> int:
 
     if not args.sorular.exists():
         print(f"✖ Soru dosyası bulunamadı: {args.sorular}")
+        return 2
+    unknown = [m for m in args.yontemler if m not in METHOD_LABEL]
+    if unknown:
+        print(f"✖ Bilinmeyen yöntem: {', '.join(unknown)} (geçerli: vector, pageindex)")
         return 2
     temp_dir = tempfile.mkdtemp(prefix="karsilastirma-")
     os.environ["DATA_DIR"] = temp_dir
@@ -325,7 +359,8 @@ def main(argv=None) -> int:
 
     try:
         run_comparison(args.sorular, args.klasor or args.sorular.parent, args.cikti, args.hakem_model,
-                       args.parca, args.topk, args.modeller, max(1, args.tekrar), args.sadece)
+                       args.parca, args.topk, args.modeller, max(1, args.tekrar), args.sadece,
+                       methods=args.yontemler)
     except (EvaluationError, QuestionFileError) as e:
         print(f"\n✖ {e}")
         return 1

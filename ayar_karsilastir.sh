@@ -5,6 +5,7 @@
 #   bash ayar_karsilastir.sh ornekler/degerlendirme/sorular.xlsx
 #   bash ayar_karsilastir.sh sorular.xlsx --tekrar 2              (her denemeyi 2 kez çalıştır)
 #   bash ayar_karsilastir.sh sorular.xlsx --parca 800,1200 --topk 4,6 --modeller qwen3:8b,qwen3:14b
+#   bash ayar_karsilastir.sh sorular.xlsx --parca 1200 --topk 6 --modeller qwen3:14b --yontemler vector,pageindex
 # Süre: deneme başına birkaç dakika (varsayılan 6-7 deneme → yaklaşık 30-60 dakika).
 
 set -euo pipefail
@@ -15,7 +16,7 @@ if [ ! -x .venv/bin/python ]; then
   exit 1
 fi
 if [ $# -eq 0 ]; then
-  echo "Kullanım: bash ayar_karsilastir.sh SORU_DOSYASI.xlsx [--tekrar N] [--parca 600,1200,2000] [--topk 3,6,10] [--modeller qwen3:8b,qwen3:14b]"
+  echo "Kullanım: bash ayar_karsilastir.sh SORU_DOSYASI.xlsx [--tekrar N] [--parca 600,1200,2000] [--topk 3,6,10] [--modeller qwen3:8b,qwen3:14b] [--yontemler vector,pageindex]"
   exit 1
 fi
 OLLAMA_URL="$(grep -E '^OLLAMA_URL=' .env 2>/dev/null | cut -d= -f2- || true)"

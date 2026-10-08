@@ -78,7 +78,8 @@ flowchart LR
 | `llm.py` | Ollama ile konuşan **tek** dosya. Uygulamanın dışarıyla kurduğu tek bağlantı buradadır. | Uzmanlara giden telefon hattı |
 | `ingest.py` | PDF/Word/TXT dosyasından metni çıkarır ve parçalara böler. | Sayfaları kesip numaralayan kişi |
 | `documents.py` | Doküman kütüphanesi: kaydeder, listeler, siler ve **arama yapar**. | Katalog ve arama sistemi |
-| `rag.py` | Bulunan parçaları ve soruyu yazara (modele) verip kaynak gösteren cevap üretir. | Araştırma asistanı |
+| `pageindex.py` | İkinci arama yöntemi (PageIndex): dokümanın içindekiler ağacını kurar, soruya göre ağaçtan bölüm seçtirir. Bkz. [bölüm 11](#11-ikinci-arama-yöntemi-pageindex). | İçindekiler sayfasına bakıp ilgili bölümü açan okur |
+| `rag.py` | Bulunan parçaları ve soruyu yazara (modele) verip kaynak gösteren cevap üretir. Ayara göre aramayı `documents.py` (vektör) ya da `pageindex.py` yapar. | Araştırma asistanı |
 | `tabular.py` | Excel/CSV dosyalarını tabloya çevirir ve soruları **SQL** ile cevaplar. | Muhasebeci |
 | `chats.py` | Sohbet geçmişini saklar ve getirir. | Arşiv |
 
@@ -112,6 +113,8 @@ flowchart LR
 | `documents` | Yüklenen dokümanların listesi: ad, sahibi, şirket dokümanı mı, durumu (işleniyor/hazır/hata). |
 | `chunks` | Dokümanların parçaları: metin, sayfa numarası ve "anlam parmak izi" (vektör). |
 | `chunks_fts` | Aynı parçaların kelime dizini (kitabın arkasındaki dizin gibi). |
+| `doc_pages` | Dokümanların sayfa sayfa metni (PageIndex seçilen bölümü okurken kullanır). Word/TXT'de ~3000 karakterlik "sanal sayfalar". |
+| `documents.tree_json` | PageIndex içindekiler ağacı: bölüm başlıkları, sayfa aralıkları, kısa özetler. |
 | `datasets` | Her kullanıcının yüklediği Excel/CSV tablolarının listesi. |
 
 > **Önemli:** Yüklenen dosyanın **kendisi** saklanmaz. Sadece içinden çıkarılan metin parçaları
@@ -588,7 +591,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 71 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 84 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
@@ -602,6 +605,9 @@ saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 - **Giriş güvenliği:** Oturum kapanınca anahtar geçersiz oluyor, hatalı giriş kilidi çalışıyor,
   güvenlik başlıkları gönderiliyor.
 - **Yerellik:** Arayüzde hiçbir dış internet adresi yok, bulut yapay zekâ kütüphanesi kalmamış.
+- **PageIndex:** Ağaç doğru kuruluyor (bitiş sayfaları, alt bölümler, uzun bölümlerin bölünmesi), metinde
+  geçmeyen "uydurma" başlıklar atılıyor, kullanıcılar birbirinin dokümanını ağaçta da göremiyor, eski
+  veritabanları kayıpsız yeni yapıya geçiyor, iki yöntem arasında ayarla geçiş çalışıyor.
 
 Çalıştırmak için: `.venv/bin/python -m pytest`
 
@@ -690,6 +696,7 @@ tabloda (`karsilastirma.xlsx`) toplar.
 | Parça boyutu (`CHUNK_CHARS`) | 600, 1200, 2000 karakter | Küçük parça: daha isabetli arama ama daha az bağlam. Büyük parça: daha çok bağlam ama model daha çok okur ve yavaşlar. |
 | Bulunan parça sayısı (`RETRIEVAL_TOP_K`) | 3, 6, 10 | Az: hızlı ama doğru parçayı kaçırabilir. Çok: daha güvenli ama yavaş, ilgisiz metin de karışabilir. |
 | Cevap modeli (`CHAT_MODEL`) | qwen3:8b, qwen3:14b | Küçük model: hızlı. Büyük model: daha isabetli. |
+| Arama yöntemi (`RAG_METHOD`) | sadece `--yontemler vector,pageindex` verilirse | Vektör mü, PageIndex mi? (bkz. bölüm 11) |
 
 - **Temel deneme**, mevcut ayarlarla (`.env`) yapılır. Diğer her deneme temelden yalnızca bir ayarla
   ayrılır. Böylece bir fark çıkarsa nedeni bellidir.
@@ -724,3 +731,100 @@ Kolay sorularda bütün ayarlar %100 verdiği için karşılaştırma ancak bu z
 | `degerlendirme/puanlama.py` | Hakem, sayı, yol ve kaynak kontrolleri. |
 | `degerlendirme/rapor.py` | Excel raporunu yazar. |
 | `degerlendirme/ornek_set.py` | Şablonu ve örnek seti yeniden üretir. Excel sorularının doğru cevapları veriden hesaplanır. |
+
+---
+
+## 11. İkinci arama yöntemi: PageIndex
+
+PageIndex, [VectifyAI/PageIndex](https://github.com/VectifyAI/PageIndex) projesinin önerdiği bir
+yöntemdir (MIT lisanslı). Vektör kullanmaz; bunun yerine bir insanın kalın bir kitapta bilgi araması
+gibi çalışır: önce **içindekiler** sayfasına bakar, ilgili bölümü seçer, sonra o sayfaları okur.
+
+Ayar: `.env` içinde `RAG_METHOD=vector` (varsayılan) ya da `RAG_METHOD=pageindex`. Değiştirip
+uygulamayı yeniden başlatmak yeterli.
+
+### İki yöntemin farkı
+
+| | Vektör (varsayılan) | PageIndex |
+|---|---|---|
+| Hazırlık | Doküman ~1200 karakterlik parçalara bölünür, her parçanın "anlam parmak izi" çıkarılır. Hızlıdır. | Model dokümanı okuyup bölüm başlıklarını ve sayfalarını çıkarır, her bölüme kısa özet yazar. **Daha yavaştır** (doküman başına modele onlarca çağrı). |
+| Arama | Soruya anlamca/kelimece en benzer parçalar. Model kullanılmaz. | Model, içindekiler ağacına bakıp hangi bölümlerin okunacağına **karar verir**. Her soruda bir model çağrısı daha. |
+| Modele verilen metin | Birbirinden kopuk 6 parça | Seçilen bölümlerin sayfaları, bütün hâlinde |
+| Güçlü olduğu yer | Çok sayıda doküman, kısa ve "kelimesi geçen" sorular | Uzun, iyi bölümlenmiş dokümanlar (yönetmelik, sözleşme, rapor); "benzer ama ilgisiz" metnin çok olduğu durumlar |
+| Zayıf olduğu yer | Benzer kelimeler geçen ama ilgisiz parçaları getirebilir | Çok doküman olunca ağaç modele sığmaz; seçim modelin muhakemesine bağlı |
+
+### Ağaç nasıl kuruluyor? (doküman yüklenince, bir kez)
+
+```mermaid
+flowchart TD
+    A[Doküman yüklendi] --> B[Metin sayfa sayfa saklanır<br/>doc_pages tablosu]
+    B --> C{PDF'in kendi<br/>içindekiler listesi var mı?}
+    C -- Evet --> E[Başlıklar oradan alınır]
+    C -- Hayır --> D[Yerel model sayfaları gruplar hâlinde okur,<br/>başlıkları ve sayfalarını çıkarır]
+    D --> V[Kontrol: başlık o sayfada gerçekten geçiyor mu?<br/>Geçmiyorsa atılır]
+    E --> T
+    V --> T[Başlıklar seviyelerine göre ağaca dizilir,<br/>her bölümün bitiş sayfası hesaplanır]
+    T --> S[Çok uzun bölümler sayfa aralıklarına bölünür]
+    S --> O[Her bölüme yerel model kısa bir özet yazar]
+    O --> K[Ağaç veritabanına kaydedilir]
+```
+
+- Dokümanın vektör parçaları da her zaman oluşturulur. Ağaç kurulurken doküman vektör aramasıyla
+  kullanılmaya devam eder. Ağaç kurulana kadar PageIndex her sayfayı bir bölüm sayar.
+- Başlık hiç bulunamazsa (ör. başlıksız düz metin) her sayfa bir bölüm olur.
+- Word/TXT dosyalarında sayfa olmadığı için metin ~3000 karakterlik "sanal sayfalara" bölünür. Bu
+  dosyalarda kaynakta sayfa numarası gösterilmez.
+- Bu özellikten önce yüklenmiş dokümanların sayfaları, saklanan parçalardan yeniden oluşturulur.
+  Dokümanları tekrar yüklemek gerekmez.
+
+### Soru sorulunca ne oluyor?
+
+```mermaid
+sequenceDiagram
+    participant K as Kullanıcı
+    participant U as Uygulama
+    participant M as Yerel model (Ollama)
+    K->>U: Soru
+    U->>M: Ağaç (başlık + sayfa + özet) ve soru:<br/>"Hangi bölümleri okumalıyım?"
+    M-->>U: {"bolumler": ["B3", "B7"]}
+    U->>U: O bölümlerin sayfalarını oku<br/>(en fazla 12.000 karakter)
+    U->>M: Sayfalar [1], [2]... + soru
+    M-->>K: Kaynak numaralı cevap (canlı akar)
+```
+
+Cevap yazma kısmı (kaynak numaraları, geçmiş, canlı akış) iki yöntemde de aynıdır. Yalnızca
+"modele hangi metni verelim?" sorusunun cevabı farklıdır. Bu sayede iki yöntem adil biçimde
+karşılaştırılabilir.
+
+### Neden PageIndex paketini doğrudan kullanmadık?
+
+Özgün PageIndex şu anda bulut modelleri (OpenAI vb.) için yazılmış. LiteLLM, openai-agents ve MCP gibi
+büyük kütüphanelere bağlı. Token sayımı için de internetten dosya indirebiliyor. Arama tarafı, modelin
+araç çağırarak (agent) dokümanda gezinmesine dayanıyor. Bu, büyük bulut modellerinde iyi çalışır;
+14B'lik yerel bir modelde ise yavaş ve kararsızdır.
+
+Bu yüzden **yöntemi** (ağaç çıkarma → başlık doğrulama → bitiş sayfaları → uzun bölümleri bölme →
+özetler → ağaçta akıl yürüterek seçme) kendi kodumuzda, yalnızca Ollama ile ve ek kütüphane olmadan
+uyguladık. Arama, araç çağırma yerine tek bir "hangi bölümler?" sorusuyla yapılıyor. Hiçbir veri
+dışarı çıkmıyor.
+
+### PageIndex ayarları
+
+| Ayar | Varsayılan | Ne işe yarar? |
+|---|---|---|
+| `RAG_METHOD` | `vector` | `pageindex` yapınca bu yöntem kullanılır. |
+| `PAGEINDEX_MAX_NODES` | 4 | Soru başına seçilebilecek en fazla bölüm. |
+| `PAGEINDEX_MAX_CONTEXT_CHARS` | 12000 | Seçilen sayfalardan modele verilecek en fazla metin. |
+| `PAGEINDEX_MAX_PAGES_PER_NODE` | 4 | Bundan uzun bölümler sayfa aralıklarına bölünür. |
+| `PAGEINDEX_GROUP_CHARS` | 12000 | Ağaç çıkarılırken modele bir seferde verilen metin. |
+| `PAGEINDEX_THINK` | false | Bölüm seçerken modelin "düşünme" adımı açılsın mı? (Daha yavaş.) |
+| `PAGEINDEX_BUILD` | auto | `always` yapılırsa vektör yöntemi seçiliyken de ağaçlar kurulur. Böylece iki yöntem arasında beklemeden geçiş yapılır. |
+
+### Sınırlar
+
+- **Çok doküman:** Bütün dokümanların ağacı tek seferde modele gösterilir. Toplam ~14.000 karakteri
+  aşarsa önce özetler çıkarılır, yine sığmazsa ağaç kesilir. Onlarca uzun doküman için önce doküman
+  seçip sonra ağaçta arama yapan iki aşamalı bir yapı gerekir.
+- **Hazırlık süresi:** Uzun bir dokümanın ağacı birkaç dakika sürebilir. Bu süre değerlendirme
+  raporunda "Hazırlık süresi" olarak ayrıca yazılır.
+- **Okuma birimi sayfadır.** Seçilen bölüm sayfanın ortasında başlasa bile sayfanın tamamı okunur.

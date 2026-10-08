@@ -12,7 +12,7 @@ cevap yazdır).
 import re
 from typing import Iterator, List, Tuple
 
-from app import config, documents, llm
+from app import config, documents, llm, pageindex
 
 SYSTEM_PROMPT = """Sen bir şirketin doküman asistanısın. Kullanıcının sorularını YALNIZCA aşağıda verilen
 doküman parçalarına dayanarak Türkçe cevaplarsın.
@@ -61,8 +61,13 @@ def _trim_history(history: List[dict]) -> List[dict]:
 
 
 def answer_stream(user: dict, question: str, history: List[dict]) -> Tuple[List[dict], Iterator[str]]:
-    """(kaynaklar, cevap akışı) döner."""
-    sources = documents.search(user, _retrieval_query(question, history))
+    """(kaynaklar, cevap akışı) döner. Kaynaklar ayardaki yönteme göre bulunur (RAG_METHOD):
+    "vector" → parçalarda anlam/kelime araması, "pageindex" → içindekiler ağacında akıl yürütme."""
+    query = _retrieval_query(question, history)
+    if config.RAG_METHOD == "pageindex":
+        sources = pageindex.search(user, query)
+    else:
+        sources = documents.search(user, query)
     if sources:
         context = _format_context(sources)
     else:

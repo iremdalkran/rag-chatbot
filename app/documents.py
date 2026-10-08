@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from app import config, db, ingest, llm
+from app import config, db, ingest, llm, pageindex
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +53,10 @@ def _row_to_doc(row, user: dict) -> dict:
         "size_bytes": row["size_bytes"],
         "created_at": row["created_at"],
         "owner_name": row["owner_name"],
+        # PageIndex içindekiler ağacının durumu: none | pending | processing | ready | error
+        "tree_status": row["tree_status"],
+        "tree_error": row["tree_error"],
+        "tree_nodes": pageindex.node_count(row["tree_json"]) if row["tree_status"] == "ready" else 0,
         "can_delete": row["owner_id"] == user["id"] or (bool(row["shared"]) and user["is_admin"]),
     }
 
@@ -77,6 +81,7 @@ def add_document(user: dict, filename: str, data: bytes, shared: bool = False) -
 def _process(doc_id: int, filename: str, data: bytes) -> None:
     try:
         pages = ingest.extract_pages(filename, data)
+        outline = ingest.pdf_outline(data) if filename.lower().endswith(".pdf") else []
         chunks = ingest.chunk_pages(pages)
         vectors = llm.embed([c.text for c in chunks])
         with db.get_conn() as conn:
@@ -94,12 +99,24 @@ def _process(doc_id: int, filename: str, data: bytes) -> None:
                 "UPDATE documents SET status = 'ready', error = NULL, page_count = ?, chunk_count = ? WHERE id = ?",
                 (page_count, len(chunks), doc_id),
             )
+            pageindex.store_pages(conn, doc_id, pages, outline)
         log.info("Doküman %s işlendi: %d parça", doc_id, len(chunks))
+        if pageindex.build_enabled():
+            # İçindekiler ağacı ayrı bir iş olarak kuyruğa girer; doküman bu arada vektör aramasıyla kullanılabilir.
+            _executor.submit(pageindex.build_tree, doc_id)
     except (ingest.IngestError, llm.LLMError) as e:
         _mark_error(doc_id, str(e))
     except Exception:
         log.exception("Doküman %s işlenirken beklenmeyen hata", doc_id)
         _mark_error(doc_id, "Dosya işlenirken beklenmeyen bir hata oluştu.")
+
+
+def resume_tree_builds() -> int:
+    """Sunucu açılışında: ağacı kurulmayı bekleyen dokümanları kuyruğa alır."""
+    pending = pageindex.pending_documents()
+    for doc_id in pending:
+        _executor.submit(pageindex.build_tree, doc_id)
+    return len(pending)
 
 
 def _mark_error(doc_id: int, message: str) -> None:
