@@ -26,8 +26,9 @@ class LLMError(Exception):
     """Kullanıcıya gösterilebilecek, anlaşılır mesajlı yapay zekâ hatası."""
 
 
-def _client() -> httpx.Client:
-    return httpx.Client(base_url=config.OLLAMA_URL, timeout=httpx.Timeout(config.LLM_TIMEOUT_SECONDS, connect=5))
+def _client(timeout: Optional[float] = None) -> httpx.Client:
+    return httpx.Client(base_url=config.OLLAMA_URL,
+                        timeout=httpx.Timeout(timeout or config.LLM_TIMEOUT_SECONDS, connect=5))
 
 
 def _raise_for(response: httpx.Response, model: str) -> None:
@@ -70,9 +71,9 @@ def embed(texts: List[str], batch_size: int = 16) -> np.ndarray:
     return matrix / norms
 
 
-def _payload(messages: list, stream: bool, json_mode: bool, temperature: float) -> dict:
+def _payload(messages: list, stream: bool, json_mode: bool, temperature: float, model: Optional[str] = None) -> dict:
     payload = {
-        "model": config.CHAT_MODEL,
+        "model": model or config.CHAT_MODEL,
         "messages": messages,
         "stream": stream,
         "options": {"num_ctx": config.LLM_CONTEXT_TOKENS, "temperature": temperature},
@@ -88,16 +89,16 @@ def _is_think_rejection(response: httpx.Response) -> bool:
     return response.status_code == 400 and "think" in response.text.lower()
 
 
-def chat(messages: list, json_mode: bool = False, temperature: float = 0.2) -> str:
-    """Cevabın tamamını tek seferde döner."""
+def chat(messages: list, json_mode: bool = False, temperature: float = 0.2, model: Optional[str] = None) -> str:
+    """Cevabın tamamını tek seferde döner. `model` verilmezse ayarlardaki sohbet modeli kullanılır."""
     global _think_supported
     try:
         with _client() as client:
-            response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature))
+            response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature, model))
             if _is_think_rejection(response):
                 _think_supported = False
-                response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature))
-            _raise_for(response, config.CHAT_MODEL)
+                response = client.post("/api/chat", json=_payload(messages, False, json_mode, temperature, model))
+            _raise_for(response, model or config.CHAT_MODEL)
             content = response.json()["message"]["content"]
     except httpx.TransportError as e:
         raise _connection_error() from e
@@ -183,7 +184,7 @@ def health() -> dict:
     result = {"ollama": False, "chat_model": config.CHAT_MODEL, "embed_model": config.EMBED_MODEL,
               "chat_model_ready": False, "embed_model_ready": False}
     try:
-        with httpx.Client(base_url=config.OLLAMA_URL, timeout=3) as client:
+        with _client(timeout=3) as client:
             response = client.get("/api/tags")
             response.raise_for_status()
             names = {m.get("name", "") for m in response.json().get("models", [])}
@@ -193,6 +194,24 @@ def health() -> dict:
     result["chat_model_ready"] = _has_model(names, config.CHAT_MODEL)
     result["embed_model_ready"] = _has_model(names, config.EMBED_MODEL)
     return result
+
+
+def server_info() -> dict:
+    """Değerlendirme raporu için: Ollama sürümü ve yüklü modellerin ayrıntıları (boyut, nicemleme)."""
+    info = {"version": None, "models": {}}
+    try:
+        with _client(timeout=5) as client:
+            info["version"] = client.get("/api/version").json().get("version")
+            for model in client.get("/api/tags").json().get("models", []):
+                details = model.get("details") or {}
+                info["models"][model.get("name", "")] = {
+                    "parameter_size": details.get("parameter_size"),
+                    "quantization": details.get("quantization_level"),
+                    "digest": (model.get("digest") or "")[:12],
+                }
+    except (httpx.HTTPError, ValueError):
+        pass
+    return info
 
 
 def _has_model(names: set, wanted: str) -> bool:

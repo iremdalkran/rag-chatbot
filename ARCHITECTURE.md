@@ -228,8 +228,19 @@ sequenceDiagram
 2. **Yönlendirme: doküman mı, Excel mi?**
    - Kullanıcının sadece dokümanı varsa soru dokümanlara, sadece Excel'i varsa tablolara gider.
    - İkisi de varsa ve üstteki seçici **Otomatik**'teyse, modele kısa bir soru sorulur: "Bu soru
-     sayısal bir tablo sorusu mu, yoksa metin belgesi sorusu mu?"
-   - Kullanıcı seçiciden **Doküman** ya da **Veri**'yi seçerek bu kararı kendisi verebilir.
+     sayısal bir tablo sorusu mu, yoksa metin belgesi sorusu mu?" Model karar verirken şunları görür:
+     - Yüklü dokümanların adları.
+     - Tabloların adları ve sütunları.
+     - Takip sorularında, bir önceki soru ve onun nereden cevaplandığı. Örneğin "peki geçen ay?"
+       sorusu, önceki soru tablodan cevaplandıysa yine tabloya gider.
+   - Model tabloyu seçer ama SQL yazarken "bu soru tablolarla ilgili değil" derse, soru boş cevapla
+     bırakılmaz, **dokümanlarda aranır**.
+   - Ollama'ya ulaşılamazsa basit bir yedek kural devreye girer: soruda "toplam, ortalama, en çok,
+     grafik…" gibi kelimeler varsa tablo, yoksa doküman seçilir.
+   - Kullanıcı seçiciden **Doküman** ya da **Veri**'yi seçerek bu kararı kendisi verebilir. O zaman
+     yukarıdaki otomatik aktarma yapılmaz.
+   - Her cevabın üstünde nereden geldiğini gösteren küçük bir etiket görünür: **"Veri tablosu · SQL"**
+     ya da **"Dokümanlar"**.
 
 3. **Takip sorusu düzeltmesi.** Soru kısaysa (6 kelime veya daha az, örneğin "peki ya ikincisi?"),
    aramaya bir önceki soru da eklenir. Yoksa "ikincisi" kelimesiyle hiçbir şey bulunamazdı.
@@ -335,9 +346,15 @@ sequenceDiagram
 
 ### Adım adım
 
-1. **Tablo yapısı okunur.** Model tablonun tamamını görmez. Sadece en fazla 8 tablonun sütun adlarını,
-   veri türlerini ve her tablodan 3 örnek satırı görür. Bu, bir veritabanı uzmanına "elimde şu
-   sütunlar var" demek gibidir.
+1. **Tablo yapısı okunur.** Model tablonun tamamını görmez. En fazla 8 tablonun sütunlarını, her
+   sütun için şu kısa tarifle birlikte görür:
+   - **Sayı sütunları:** en küçük ve en büyük değer (ör. "tutar: 40 ile 250 arası").
+   - **Az çeşitli metin sütunları:** olası değerlerin **tamamı** (ör. "şehir: 'Ankara', 'İstanbul',
+     'İzmir'"). Böylece model `WHERE sehir = 'Istanbul'` gibi yanlış yazımla sonuçsuz bir sorgu
+     yazmaz, değeri listeden birebir alır.
+   - **Tarih sütunları:** tarih aralığı ve aylık/yıllık gruplama için kullanılacak formül.
+
+   Bu, bir veritabanı uzmanına "elimde şu sütunlar var, içlerinde şunlar yazıyor" demek gibidir.
 
 2. **Soru SQL'e çevrilir.** Model "sadece SELECT yaz, olmayan sütun uydurma, çok satır varsa sırala
    ve 100 ile sınırla" kurallarıyla tek bir sorgu yazar. Takip soruları için son 4 mesaj da verilir.
@@ -363,9 +380,12 @@ sequenceDiagram
    - Sayı içeren sütunlar grafiğin değerleri olur.
    - Soruda "pasta, dağılım, oran, yüzde" geçiyorsa **pasta**, "trend, zaman içinde, aylık" geçiyorsa
      **çizgi**, diğer durumlarda **sütun** grafiği çizilir.
+   - Sayı sütunlarının ölçekleri çok farklıysa (ör. adet 2-13, tutar 160-400), hepsi aynı grafiğe
+     çizilince küçük olanlar görünmez olur. Bu durumda grafikte sadece sorgunun sıraladığı sütun
+     gösterilir. Diğerleri tabloda durur.
 
-7. **Şeffaflık:** Arayüz **kullanılan SQL sorgusunu** da gösterir. Uzman bir kullanıcı modelin soruyu
-   doğru anlayıp anlamadığını buradan kontrol edebilir.
+7. **Şeffaflık:** Cevabın altında **"Kullanılan SQL"** başlığı vardır. Tıklanınca çalıştırılan sorgu
+   açılır. Uzman bir kullanıcı modelin soruyu doğru anlayıp anlamadığını buradan kontrol edebilir.
 
 ### Bu yaklaşımın sınırları
 - **Mantık hatası.** Model soruyu yanlış anlarsa sorgu çalışır ama yanlış şeyi hesaplar. Örneğin
@@ -502,8 +522,16 @@ Bölüm 5'te ayrıntılı anlatıldı. Değerlendirilen alternatifler:
 **Neden:** İkisi de yüklüyse, sorunun hangisine gideceğine model karar verir. Tek kelimelik bu karar
 yaklaşık 1 saniye sürer. Eski sürüm her soruyu önce Excel'e gönderiyordu. Bu yüzden PDF soruları
 neredeyse hiç cevaplanmıyordu.
-**Alternatif:** Anahtar kelime kuralları ("toplam", "ortalama" geçiyorsa Excel). Daha hızlı ama çok
-sık yanılır. Kullanıcı her zaman seçiciden modu elle de belirleyebilir.
+Karar hatalı olabileceği için iki güvenlik ağı vardır:
+- Tablo yolu "ilgisiz soru" derse soru dokümanlara aktarılır.
+- Cevabın üstündeki etiket kararı görünür kılar. Kullanıcı yanlış yolu fark ederse seçiciden modu
+  elle belirleyebilir.
+
+**Alternatifler:**
+- **Anahtar kelime kuralları** ("toplam", "ortalama" geçiyorsa Excel). Daha hızlı ama çok sık yanılır.
+  Bu yüzden sadece Ollama'ya ulaşılamadığında yedek olarak kullanılıyor.
+- **Her soruyu iki yoldan da çalıştırıp daha iyi cevabı seçmek.** Daha isabetli olabilir ama her
+  soruda bekleme süresini yaklaşık iki katına çıkarır.
 
 ### 7.11 Cevabın canlı akması
 
@@ -560,7 +588,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 40 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 65 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
@@ -576,3 +604,83 @@ saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 - **Yerellik:** Arayüzde hiçbir dış internet adresi yok, bulut yapay zekâ kütüphanesi kalmamış.
 
 Çalıştırmak için: `.venv/bin/python -m pytest`
+
+---
+
+## 10. Cevap kalitesi değerlendirmesi
+
+Otomatik testler (`tests/`) sahte bir modelle **kodun doğru çalıştığını** kontrol eder. Ama "gerçek
+model, gerçek dokümanlarda ne kadar doğru cevap veriyor?" sorusunu cevaplayamazlar. Bunun için ayrı
+bir araç var: `degerlendirme/` klasörü ve `degerlendir.sh` komutu.
+
+### Nasıl çalışır?
+
+```mermaid
+flowchart TD
+    Q["📋 sorular.xlsx<br/>soru · doğru cevap · kaynak dosya ·<br/>kaynak sayfa · soru türü"] --> R
+    F["📂 Aynı klasördeki<br/>PDF / Word / Excel dosyaları"] --> R
+    R["degerlendir.sh"] --> T["Geçici, boş bir veri klasörü açılır<br/>(gerçek data/ klasörüne dokunulmaz)"]
+    T --> U["Uygulama arka planda başlar,<br/>dosyalar yüklenir"]
+    U --> A["Her soru yeni bir sohbette,<br/>Otomatik modda sorulur"]
+    A --> P["Puanlama<br/>• Hakem model: Doğru / Kısmen / Yanlış<br/>• Sayılar tuttu mu? (kurallı)<br/>• Yol doğru mu?<br/>• Kaynak bulundu / gösterildi mi?<br/>• Süre ve ilk kelime süresi"]
+    P --> X["📊 rapor_TARIH_MODEL.xlsx<br/>Özet · Sonuçlar · Ayarlar"]
+```
+
+1. **Gerçek kod yolu.** Uygulama arka planda gerçekten başlatılır ve sorular kullanıcının kullandığı
+   adrese gönderilir. Böylece yönlendirme, arama, SQL ve cevabın akışı aynen ölçülür.
+2. **Temiz başlangıç.** Her çalıştırma geçici, boş bir veri klasörüyle başlar ve iş bitince bu klasör
+   silinir. Sizin kullanıcılarınız, sohbetleriniz ve dokümanlarınız etkilenmez. Önceki bir ölçümün
+   kalıntısı da sonucu bozamaz.
+3. **Her soru yeni sohbette.** Sorular birbirini etkilemez.
+
+### Neler ölçülüyor?
+
+| Ölçüm | Nasıl? | Ne işe yarar? |
+|---|---|---|
+| **Karar** (Doğru / Kısmen / Yanlış) | Hakem model, sistemin cevabını beklenen cevapla karşılaştırır. Hakem de yereldir, veri dışarı çıkmaz. | Genel kalite. |
+| **Sayılar tuttu mu?** | Beklenen cevaptaki her sayı, sistemin cevabında veya sonuç tablosunda geçiyor mu? Modele dayanmayan, kurallı bir kontroldür. "3.500" ile "3500" aynı sayılır. | Hakemin yanılmasına karşı bağımsız bir kontrol. Özellikle Excel soruları için. |
+| **Yol doğru mu?** | Doküman sorusu dokümanlara, Excel sorusu SQL'e mi gitti? | Doküman/SQL kararının kalitesi. |
+| **Aramada bulundu mu?** | Doğru dosya ve sayfa, modele verilen parçalar arasında var mıydı? | Arama kalitesi. |
+| **Cevapta gösterildi mi?** | Doğru dosya ve sayfa, cevaptaki [n] kaynakları arasında var mı? Excel'de: SQL doğru tabloyu kullandı mı? | Atıf kalitesi. |
+| **Süre / İlk kelime** | Sorunun gönderilmesinden cevabın bitmesine kadar geçen süre, ve ilk kelimenin ekrana gelme süresi. | Kullanıcının bekleme deneyimi. |
+
+**Hatanın yerini bulmak:** "Aramada bulundu: evet, Karar: Yanlış" ise doğru bilgi modele verilmiş ama
+model doğru cevabı yazamamıştır. Çözüm modelde ya da yönlendirme komutundadır. "Aramada bulundu: hayır"
+ise sorun aramadadır. Çözüm parça boyutu, aranan parça sayısı ya da arama modelindedir.
+
+**"Dokümanda olmayan" sorular** sistemin **uydurup uydurmadığını** ölçer. Bu sorularda "Doğru", sistemin
+"bulamadım" demesi anlamına gelir. Bir doküman asistanı için en önemli ölçümlerden biridir.
+
+### Hakem modeli hakkında
+Varsayılan hakem, sohbet modelinin kendisidir. Bir model kendi cevaplarına karşı hoşgörülü olabilir.
+Bu yüzden rapor bu durumu açıkça yazar. Daha tarafsız bir ölçüm için farklı (tercihen daha büyük) bir
+model kullanılabilir:
+
+```bash
+bash degerlendir.sh sorular.xlsx --hakem-model qwen3:30b-a3b
+```
+
+Hakem de yanılabilir. Bu yüzden "Sayılar tuttu" kontrolü ve rapordaki "Hakemin gerekçesi" sütunu,
+şüpheli satırları gözle kontrol etmeyi kolaylaştırır.
+
+### Ayarların kaydedilmesi
+Raporun **Ayarlar** sayfasında şunlar yazar:
+- Kodun git sürümü.
+- Sohbet, arama ve hakem modelleri (boyut, nicemleme ve parmak izi dahil).
+- Ollama sürümü.
+- Bağlam penceresi, aranan parça sayısı, parça boyutu ve örtüşmesi.
+- Bilgisayar bilgisi.
+- Yüklenen dosyalar.
+
+Böylece "model değiştirince ne oldu?" ya da "parça boyutunu küçültünce arama iyileşti mi?" gibi
+sorular, iki raporu yan yana koyarak cevaplanabilir.
+
+### Dosyalar
+| Dosya | Görevi |
+|---|---|
+| `degerlendirme/sablon.xlsx` | Boş soru şablonu. "Soru türü" sütununda açılır liste ve "Nasıl doldurulur" sayfası var. |
+| `ornekler/degerlendirme/` | Hemen denenebilecek örnek set: 3 sayfalık örnek bir personel yönetmeliği, kahve tarihi PDF'i, satış Excel'i ve 14 soru. |
+| `degerlendirme/calistir.py` | Uygulamayı başlatır, dosyaları yükler, soruları sorar. |
+| `degerlendirme/puanlama.py` | Hakem, sayı, yol ve kaynak kontrolleri. |
+| `degerlendirme/rapor.py` | Excel raporunu yazar. |
+| `degerlendirme/ornek_set.py` | Şablonu ve örnek seti yeniden üretir. Excel sorularının doğru cevapları veriden hesaplanır. |

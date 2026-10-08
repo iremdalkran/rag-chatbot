@@ -36,6 +36,8 @@ class FakeOllama:
     def __init__(self):
         self.sql = "SELECT urun, SUM(adet) AS toplam FROM satislar GROUP BY urun ORDER BY toplam DESC"
         self.chat_requests = []
+        self.judge_requests = []
+        self.judge_verdict = "dogru"
         self.down = False
 
     def reply(self, payload: dict) -> str:
@@ -43,6 +45,9 @@ class FakeOllama:
         last = payload["messages"][-1]["content"]
         if "SQLite uzmanısın" in system:
             return self.sql
+        if "tarafsız bir hakemsin" in system:
+            self.judge_requests.append(payload)
+            return json.dumps({"karar": self.judge_verdict, "gerekce": "test gerekçesi"})
         if payload.get("format") == "json":
             return json.dumps({"answer": "En çok satan ürün elma.", "suggestions": ["a?", "b?", "c?"]})
         if "VERI ya da DOKUMAN" in last:
@@ -65,7 +70,12 @@ class FakeOllama:
             lines.append(json.dumps({"message": {"content": ""}, "done": True}))
             return httpx.Response(200, content="\n".join(lines).encode())
         if request.url.path == "/api/tags":
-            return httpx.Response(200, json={"models": [{"name": "qwen3:14b"}, {"name": "bge-m3:latest"}]})
+            return httpx.Response(200, json={"models": [
+                {"name": "qwen3:14b", "digest": "abc123def4567890",
+                 "details": {"parameter_size": "14.8B", "quantization_level": "Q4_K_M"}},
+                {"name": "bge-m3:latest", "details": {"parameter_size": "567M", "quantization_level": "F16"}}]})
+        if request.url.path == "/api/version":
+            return httpx.Response(200, json={"version": "0.40.0"})
         return httpx.Response(404, json={"error": "not found"})
 
 
@@ -84,7 +94,7 @@ def fresh_state(tmp_path, monkeypatch):
 def ollama(monkeypatch):
     fake = FakeOllama()
     transport = httpx.MockTransport(fake.handler)
-    monkeypatch.setattr(llm, "_client", lambda: httpx.Client(base_url="http://ollama", transport=transport))
+    monkeypatch.setattr(llm, "_client", lambda timeout=None: httpx.Client(base_url="http://ollama", transport=transport))
     return fake
 
 

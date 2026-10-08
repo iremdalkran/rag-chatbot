@@ -220,6 +220,13 @@ a { color: var(--accent); }
 .msg-bot .bot-avatar .icon { width: 16px; height: 16px; }
 .msg-bot .bot-body { flex: 1; min-width: 0; }
 .msg-error .content { color: var(--danger); }
+.route:empty { display: none; }
+.route { margin-bottom: 6px; }
+.route-badge {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--muted);
+  background: var(--panel-2); border-radius: 999px; padding: 2px 9px 2px 7px;
+}
+.route-badge .icon { width: 13px; height: 13px; }
 
 .content { word-wrap: break-word; }
 .content > :first-child { margin-top: 0; }

@@ -342,12 +342,19 @@ function userMessage(text) {
 }
 
 function botMessage() {
+  const route = el("div", { class: "route" });
   const content = el("div", { class: "content" });
   const extras = el("div", {});
   const tools = el("div", { class: "msg-tools" });
-  const body = el("div", { class: "bot-body" }, content, extras, tools);
+  const body = el("div", { class: "bot-body" }, route, content, extras, tools);
   const root = el("div", { class: "msg msg-bot" }, el("span", { class: "bot-avatar" }, icon("logo")), body);
-  return { root, content, extras, tools, text: "", sources: [] };
+  return { root, route, content, extras, tools, text: "", sources: [] };
+}
+
+function routeBadge(mode) {
+  return mode === "data"
+    ? el("span", { class: "route-badge", title: "Cevap, tablolarınızda çalıştırılan bir SQL sorgusuyla hesaplandı" }, icon("table"), "Veri tablosu · SQL")
+    : el("span", { class: "route-badge", title: "Cevap, dokümanlarınızda yapılan aramayla bulundu" }, icon("library"), "Dokümanlar");
 }
 
 function showTyping(view, label) {
@@ -422,6 +429,8 @@ function finishBotMessage(view, message) {
   view.root.classList.toggle("msg-error", Boolean(message.error));
   renderContent(view, view.text, view.sources.length, false);
   view.extras.replaceChildren();
+  view.route.replaceChildren();
+  if (message.mode && !message.error) view.route.appendChild(routeBadge(message.mode));
 
   const cited = view.sources.filter((s) => s.cited);
   if (cited.length) {
@@ -437,7 +446,7 @@ function finishBotMessage(view, message) {
   if (message.table) view.extras.appendChild(tableCard(message.table));
   if (message.chart) view.extras.appendChild(chartCard(message.chart));
   if (message.sql) {
-    view.extras.appendChild(el("details", { class: "sql" }, el("summary", { text: "Kullanılan SQL sorgusu" }), el("pre", { text: message.sql })));
+    view.extras.appendChild(el("details", { class: "sql" }, el("summary", { text: "Kullanılan SQL" }), el("pre", { text: message.sql })));
   }
   if (message.suggestions && message.suggestions.length) {
     view.extras.appendChild(el("div", { class: "suggestions" },
@@ -579,7 +588,7 @@ async function sendQuestion(text) {
   inner.appendChild(userMessage(question));
   const view = botMessage();
   inner.appendChild(view.root);
-  showTyping(view, state.mode === "data" ? "Veriler inceleniyor…" : "Kaynaklar taranıyor…");
+  showTyping(view, { data: "SQL sorgusu hazırlanıyor…", docs: "Dokümanlarda aranıyor…" }[state.mode] || "Soru inceleniyor…");
   scrollToBottom(true);
 
   const controller = new AbortController();
@@ -631,6 +640,9 @@ async function sendQuestion(text) {
               if (chat && state.currentChatId === chatId) setChatTitle(chat.title);
             });
           }
+        } else if (event.type === "route") {
+          view.route.replaceChildren(routeBadge(event.mode));
+          if (!view.text) showTyping(view, event.mode === "data" ? "SQL sorgusu hazırlanıyor ve çalıştırılıyor…" : "Dokümanlarda aranıyor…");
         } else if (event.type === "token") {
           view.text += event.text;
           if (!pending) { pending = true; requestAnimationFrame(flush); }

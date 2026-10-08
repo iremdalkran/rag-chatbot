@@ -90,6 +90,18 @@ def get_messages(chat_id: int, user_id: int) -> List[dict]:
     return result
 
 
+def last_answer_mode(chat_id: int) -> Optional[str]:
+    """Bu sohbetteki son cevap nereden geldi? ('docs', 'data' ya da bilinmiyorsa None)"""
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT extra_json FROM messages WHERE chat_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
+            (chat_id,),
+        ).fetchone()
+    if not row or not row["extra_json"]:
+        return None
+    return json.loads(row["extra_json"]).get("mode")
+
+
 def history_for_llm(chat_id: int, limit: int) -> List[dict]:
     """Modele verilecek son mesajlar (sadece rol + metin, eskiden yeniye)."""
     with db.get_conn() as conn:

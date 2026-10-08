@@ -206,7 +206,19 @@ def _event(payload: dict) -> bytes:
     return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
 
 
-def _choose_mode(user: dict, question: str, requested: str, has_docs: bool, has_data: bool) -> Optional[str]:
+# Model cevap veremezse (Ollama kapalı vb.) kullanılacak basit yedek kural.
+_DATA_HINTS = ("toplam", "ortalama", "kaç tane", "kaç adet", "en çok", "en az", "en yüksek", "en düşük",
+               "sırala", "grafik", "yüzde", "oran", "sayısı", "listele", "tablo")
+
+
+def _choose_mode(user: dict, question: str, requested: str, has_docs: bool, has_data: bool,
+                 history: list, last_mode: Optional[str]) -> Optional[str]:
+    """
+    Soru doküman aramasıyla mı ('docs'), tablolarda SQL ile mi ('data') cevaplanmalı?
+    Kullanıcı seçiciden elle seçtiyse ona uyulur; tek tür kaynak varsa o seçilir; ikisi de varsa
+    karar modele sorulur. Model, kaynakların adlarını/kolonlarını ve (takip sorularında) bir önceki
+    soruyu da görür.
+    """
     if requested == "docs":
         return "docs" if has_docs else None
     if requested == "data":
@@ -217,18 +229,32 @@ def _choose_mode(user: dict, question: str, requested: str, has_docs: bool, has_
         return "data"
     if not has_docs and not has_data:
         return None
-    # İkisi de varsa modele soruyoruz: tablo sorusu mu, doküman sorusu mu?
-    tables = ", ".join(d["table_name"] for d in tabular.list_datasets(user["id"])[:8])
+
+    datasets = tabular.list_datasets(user["id"])[:8]
+    tables = "; ".join(f"{d['table_name']} ({', '.join(d['columns'][:12])})" for d in datasets)
+    doc_names = ", ".join(d["filename"] for d in documents.list_documents(user) if d["status"] == "ready")[:600]
+    previous = next((m["content"] for m in reversed(history) if m["role"] == "user"), None)
+    context = ""
+    if previous:
+        kind = {"data": "VERI", "docs": "DOKUMAN"}.get(last_mode or "", "bilinmiyor")
+        context = (f"Sohbetteki önceki soru: {previous[:300]}\nÖnceki soru şuradan cevaplandı: {kind}\n"
+                   "(Yeni soru öncekinin devamıysa, örneğin “peki geçen ay?”, genelde aynı kaynak seçilmelidir.)\n\n")
     prompt = (
         "Kullanıcının elinde iki tür kaynak var:\n"
-        f"- VERI: Excel/CSV tabloları ({tables}). Sayısal analiz, toplam, ortalama, sıralama, grafik soruları.\n"
-        "- DOKUMAN: PDF/Word metin belgeleri. Kurallar, prosedürler, açıklamalar, içerik soruları.\n"
+        f"- VERI: Excel/CSV tabloları — {tables}. Sayma, toplama, ortalama, sıralama, filtreleme, karşılaştırma "
+        "ve grafik isteyen sorular; ya da tablolardaki kolonlarla ilgili kayıt arama soruları.\n"
+        f"- DOKUMAN: PDF/Word/metin belgeleri — {doc_names}. Kurallar, prosedürler, tanımlar, açıklamalar, "
+        "sözleşme maddeleri gibi metin içeriği soruları.\n\n"
+        f"{context}"
         "Aşağıdaki soru hangisiyle cevaplanmalı? Sadece VERI ya da DOKUMAN yaz.\n\n"
         f"Soru: {question}"
     )
     try:
         decision = llm.chat([{"role": "user", "content": prompt}], temperature=0.0).upper()
     except llm.LLMError:
+        q = question.lower()
+        return "data" if any(h in q for h in _DATA_HINTS) else "docs"
+    if "DOKUMAN" in decision or "DOKÜMAN" in decision:
         return "docs"
     return "data" if "VERI" in decision or "VERİ" in decision else "docs"
 
@@ -244,6 +270,7 @@ def ask(body: AskBody, user: dict = Depends(current_user)):
         chat = chats.create_chat(user["id"])
     chat_id = chat["id"]
     history = chats.history_for_llm(chat_id, config.HISTORY_MESSAGES)
+    last_mode = chats.last_answer_mode(chat_id)
     chats.add_message(chat_id, "user", question, question=question)
 
     recorder = _AnswerRecorder(chat_id)
@@ -253,7 +280,7 @@ def ask(body: AskBody, user: dict = Depends(current_user)):
         has_docs = documents.has_ready_documents(user)
         has_data = tabular.has_datasets(user["id"])
         try:
-            mode = _choose_mode(user, question, body.mode, has_docs, has_data)
+            mode = _choose_mode(user, question, body.mode, has_docs, has_data, history, last_mode)
             if mode is None:
                 answer = ("Henüz soru sorabileceğim bir kaynak yok. Sol menüdeki “Kaynaklar” bölümünden bir doküman "
                           "(PDF, Word, TXT) veya veri dosyası (Excel, CSV) yükleyebilirsiniz.")
@@ -266,13 +293,20 @@ def ask(body: AskBody, user: dict = Depends(current_user)):
                 return
 
             if mode == "data":
+                yield _event({"type": "route", "mode": "data"})
                 result = tabular.ask(user["id"], question, history)
-                extra = {k: result[k] for k in ("sql", "table", "chart", "suggestions") if result.get(k)}
-                extra["mode"] = "data"
-                recorder.save(result["answer"], extra)
-                yield _event({"type": "done", "message": {"role": "assistant", "content": result["answer"], **extra}})
-                return
+                # Model "bu soru tablolarla ilgili değil" dediyse ve kullanıcı modu kendisi seçmediyse,
+                # soruyu boş cevapla bırakmak yerine dokümanlarda arıyoruz.
+                if result.get("no_query") and has_docs and body.mode == "auto":
+                    mode = "docs"
+                else:
+                    extra = {k: result[k] for k in ("sql", "table", "chart", "suggestions") if result.get(k)}
+                    extra["mode"] = "data"
+                    recorder.save(result["answer"], extra)
+                    yield _event({"type": "done", "message": {"role": "assistant", "content": result["answer"], **extra}})
+                    return
 
+            yield _event({"type": "route", "mode": "docs"})
             sources, stream = rag.answer_stream(user, question, history)
             recorder.sources = sources
             for piece in stream:
