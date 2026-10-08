@@ -6,3 +6,6 @@ __pycache__/
 data/
 .DS_Store
 degerlendirme/raporlar/
+
+# İş Kanunu testi için indirilen kanun metni ve oluşturulan soru dosyası
+ornekler/is_kanunu/

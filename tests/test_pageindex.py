@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -200,3 +201,81 @@ def test_old_database_gets_new_columns_and_pages_rebuilt_from_chunks(tmp_path, m
             c.execute("INSERT INTO chunks (document_id, chunk_index, page, text, embedding) VALUES (1, ?, ?, ?, x'00')",
                       (i, page, text))
     assert pageindex._load_pages(1) == ["Birinci cümle. İkinci cümle. Üçüncü cümle.", "Dördüncü cümle."]
+
+
+# --- Kanun / yönetmelik yapısı ---
+
+ARTICLE_BODY = "Bu madde hükmüne göre işveren ile işçi arasındaki ilişkiler düzenlenir ve uygulanır. " * 4
+LAW_PAGES = [
+    "İŞ KANUNU\nKanun Numarası : 4857\nBİRİNCİ BÖLÜM\nGenel Hükümler\nAmaç ve kapsam\nMadde 1 – " + ARTICLE_BODY
+    + "\nTanımlar\nMadde 2 – " + ARTICLE_BODY + "\nEşit davranma ilkesi",              # başlık sayfa sonunda kaldı
+    "Madde 3 – " + ARTICLE_BODY + "\nİKİNCİ BÖLÜM\nİş Sözleşmesi\nDeneme süresi\n(Değişik: 1/1/2020-1/1 md.)\n"
+    "Madde 4 – Deneme süresi en çok iki aydır. " + ARTICLE_BODY,
+    ARTICLE_BODY + "\nÇalışma süresi\nMadde 5 – Çalışma süresi haftada en çok kırkbeş saattir. " + ARTICLE_BODY
+    + "\nGeçici Madde 1 – Geçiş hükümleri uygulanır.",
+]
+
+
+def test_law_structure_is_read_from_text_without_model(monkeypatch):
+    calls = []
+    monkeypatch.setattr(llm, "chat", lambda messages, **kw: calls.append(messages) or "kısa özet")
+    nodes, origin = pageindex.make_tree(LAW_PAGES)
+    assert origin == "mevzuat"
+    assert not any("BAŞLAYAN" in m[-1]["content"] for m in calls)  # başlık çıkarmak için model çağrılmadı
+    assert [n["title"] for n in nodes] == ["BİRİNCİ BÖLÜM – Genel Hükümler", "İKİNCİ BÖLÜM – İş Sözleşmesi"]
+    assert [c["title"] for c in nodes[0]["nodes"]] == [
+        "Madde 1 – Amaç ve kapsam", "Madde 2 – Tanımlar", "Madde 3 – Eşit davranma ilkesi"]
+    assert [c["title"] for c in nodes[1]["nodes"]] == [
+        "Madde 4 – Deneme süresi", "Madde 5 – Çalışma süresi", "Geçici Madde 1"]
+    article3 = nodes[0]["nodes"][2]
+    assert (article3["start"], article3["end"]) == (1, 2)  # başlığı 1. sayfanın sonunda, metni 2. sayfada
+    # Madde metinleri birbirine karışmıyor.
+    article4_text = pageindex._node_text(nodes[1]["nodes"][0], LAW_PAGES, 5000)
+    assert article4_text.startswith("Deneme süresi\n(Değişik") and "Madde 5" not in article4_text
+    assert "Madde 3" not in article4_text and "İKİNCİ BÖLÜM" not in article4_text
+
+
+def test_selected_article_is_read_without_rest_of_page(monkeypatch):
+    monkeypatch.setattr(llm, "chat", lambda messages, **kw: "kısa özet")
+    nodes, _ = pageindex.make_tree(LAW_PAGES)
+    monkeypatch.setattr(pageindex.db, "get_conn", _FakeConn.factory(LAW_PAGES))
+    doc = {"id": 1, "filename": "is_kanunu.pdf", "paged": True}
+    article5 = nodes[1]["nodes"][1]
+    sources = pageindex._read_sections([(doc, nodes[1]), (doc, article5)])  # üst bölüm + maddesi seçildi
+    assert [s["page"] for s in sources] == [3]  # daha dar olan (madde) okundu
+    assert sources[0]["text"].startswith("Çalışma süresi\nMadde 5") and "Geçici Madde" not in sources[0]["text"]
+    assert sources[0]["section"] == "Madde 5 – Çalışma süresi"
+
+
+def test_large_tree_is_searched_in_two_steps(monkeypatch):
+    monkeypatch.setattr(pageindex, "_OUTLINE_LIMIT", 400)  # ağaç "sığmasın"
+    monkeypatch.setattr(llm, "chat", lambda messages, **kw: "Bu madde uzun bir özet metnidir. " * 3)
+    nodes, _ = pageindex.make_tree(LAW_PAGES)
+    doc = {"id": 1, "filename": "is_kanunu.pdf", "paged": True, "nodes": nodes}
+    monkeypatch.setattr(pageindex, "_accessible_trees", lambda user: [doc])
+    monkeypatch.setattr(pageindex.db, "get_conn", _FakeConn.factory(LAW_PAGES))
+    prompts = []
+
+    def chat(messages, **kw):
+        prompt = messages[-1]["content"]
+        prompts.append(prompt)
+        outline = prompt.split("Soru:")[0]
+        if "İLK ADIM" in prompt:  # 1. adım: sadece bölümler görünür
+            key = next(k for k, t in re.findall(r"(B\d+) \[[^]]*\] (.*)", outline) if "İKİNCİ BÖLÜM" in t)
+        else:
+            key = next(k for k, t in re.findall(r"(B\d+) \[[^]]*\] (.*)", outline) if "Çalışma süresi" in t)
+        return json.dumps({"bolumler": [key]})
+
+    monkeypatch.setattr(llm, "chat", chat)
+    sources = pageindex.search({"id": 1}, "Haftalık çalışma süresi en fazla kaç saat?")
+    assert len(prompts) == 2
+    first = prompts[0].split("Soru:")[0]
+    assert len(re.findall(r"B\d+ \[", first)) == 2              # 1. adımda sadece iki bölüm, maddeler ayrı satır değil
+    second = prompts[1].split("Soru:")[0]
+    assert "Madde 4 – Deneme süresi" in second and "Madde 1 –" not in second  # 2. adım: sadece seçilen bölüm
+    assert sources[0]["section"] == "Madde 5 – Çalışma süresi" and sources[0]["page"] == 3
+
+
+def test_ordinary_text_with_few_articles_is_not_treated_as_law():
+    pages = ["Giriş\nMadde 1 – tek bir madde geçiyor. " + FILLER, FILLER]
+    assert pageindex._legal_headings(pages) == []

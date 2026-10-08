@@ -591,7 +591,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 84 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 89 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
@@ -607,7 +607,9 @@ saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 - **Yerellik:** Arayüzde hiçbir dış internet adresi yok, bulut yapay zekâ kütüphanesi kalmamış.
 - **PageIndex:** Ağaç doğru kuruluyor (bitiş sayfaları, alt bölümler, uzun bölümlerin bölünmesi), metinde
   geçmeyen "uydurma" başlıklar atılıyor, kullanıcılar birbirinin dokümanını ağaçta da göremiyor, eski
-  veritabanları kayıpsız yeni yapıya geçiyor, iki yöntem arasında ayarla geçiş çalışıyor.
+  veritabanları kayıpsız yeni yapıya geçiyor, iki yöntem arasında ayarla geçiş çalışıyor. Kanun
+  maddeleri doğru ayrılıyor, seçilen madde sayfanın geri kalanı olmadan okunuyor, büyük ağaçta iki adımlı
+  arama çalışıyor.
 
 Çalıştırmak için: `.venv/bin/python -m pytest`
 
@@ -758,7 +760,10 @@ uygulamayı yeniden başlatmak yeterli.
 ```mermaid
 flowchart TD
     A[Doküman yüklendi] --> B[Metin sayfa sayfa saklanır<br/>doc_pages tablosu]
-    B --> C{PDF'in kendi<br/>içindekiler listesi var mı?}
+    B --> L{Kanun/yönetmelik gibi<br/>'MADDE 12 –' yapısı var mı?}
+    L -- Evet --> M[Kısım, bölüm ve maddeler<br/>doğrudan metinden okunur<br/>model gerekmez]
+    M --> T
+    L -- Hayır --> C{PDF'in kendi<br/>içindekiler listesi var mı?}
     C -- Evet --> E[Başlıklar oradan alınır]
     C -- Hayır --> D[Yerel model sayfaları gruplar hâlinde okur,<br/>başlıkları ve sayfalarını çıkarır]
     D --> V[Kontrol: başlık o sayfada gerçekten geçiyor mu?<br/>Geçmiyorsa atılır]
@@ -769,6 +774,12 @@ flowchart TD
     O --> K[Ağaç veritabanına kaydedilir]
 ```
 
+- **Kanun ve yönetmelikler:** "BİRİNCİ BÖLÜM", "MADDE 63 –" gibi kalıplar ve maddenin üstündeki konu
+  başlığı ("Çalışma süresi") doğrudan metinden okunur. Böylece her madde ayrı bir bölüm olur
+  ("Madde 63 – Çalışma süresi"). Başlık çıkarmak için modele hiç soru gitmez; bu adım saniyeler sürer.
+  Metinde bu kalıp en az 5 kez geçmiyorsa doküman kanun sayılmaz ve diğer yollar denenir.
+- **Bölüm sınırları karakter düzeyinde tutulur.** Bir sayfada birkaç madde varsa, her maddenin nerede
+  başlayıp bittiği bilinir. Model bir maddeyi seçince sayfanın tamamı değil, sadece o madde okunur.
 - Dokümanın vektör parçaları da her zaman oluşturulur. Ağaç kurulurken doküman vektör aramasıyla
   kullanılmaya devam eder. Ağaç kurulana kadar PageIndex her sayfayı bir bölüm sayar.
 - Başlık hiç bulunamazsa (ör. başlıksız düz metin) her sayfa bir bölüm olur.
@@ -786,11 +797,18 @@ sequenceDiagram
     participant M as Yerel model (Ollama)
     K->>U: Soru
     U->>M: Ağaç (başlık + sayfa + özet) ve soru:<br/>"Hangi bölümleri okumalıyım?"
+    Note over U,M: Ağaç sığmıyorsa önce sadece ana bölümler gösterilir,<br/>sonra seçilenlerin maddeleri (iki adım)
     M-->>U: {"bolumler": ["B3", "B7"]}
-    U->>U: O bölümlerin sayfalarını oku<br/>(en fazla 12.000 karakter)
+    U->>U: O bölümlerin metnini oku<br/>(en fazla 12.000 karakter)
     U->>M: Sayfalar [1], [2]... + soru
     M-->>K: Kaynak numaralı cevap (canlı akar)
 ```
+
+**İki adımlı arama:** Ağaç (başlıklar ve özetler) modele bir seferde gösterilemeyecek kadar büyükse,
+örneğin 120 maddelik bir kanunda, arama iki adımda yapılır. Önce sadece ana bölümler gösterilir ve model
+en fazla 3 bölüm seçer. Sonra yalnızca o bölümlerin maddeleri özetleriyle gösterilir. Böylece model
+maddeleri sadece numarasıyla değil, ne anlattıklarıyla görür. Bunun bedeli, soru başına bir model
+çağrısı daha yapılmasıdır.
 
 Cevap yazma kısmı (kaynak numaraları, geçmiş, canlı akış) iki yöntemde de aynıdır. Yalnızca
 "modele hangi metni verelim?" sorusunun cevabı farklıdır. Bu sayede iki yöntem adil biçimde
@@ -822,9 +840,20 @@ dışarı çıkmıyor.
 
 ### Sınırlar
 
-- **Çok doküman:** Bütün dokümanların ağacı tek seferde modele gösterilir. Toplam ~14.000 karakteri
-  aşarsa önce özetler çıkarılır, yine sığmazsa ağaç kesilir. Onlarca uzun doküman için önce doküman
-  seçip sonra ağaçta arama yapan iki aşamalı bir yapı gerekir.
+- **Çok doküman:** Ağaç ~14.000 karakteri aşarsa arama iki adımda yapılır (yukarıda). İlk adımda bile
+  sığmayacak kadar çok doküman varsa özetler atılır, gerekirse liste kesilir.
 - **Hazırlık süresi:** Uzun bir dokümanın ağacı birkaç dakika sürebilir. Bu süre değerlendirme
   raporunda "Hazırlık süresi" olarak ayrıca yazılır.
-- **Okuma birimi sayfadır.** Seçilen bölüm sayfanın ortasında başlasa bile sayfanın tamamı okunur.
+- **Okuma birimi:** Yeri tam bilinen bölümlerde (kanun maddeleri, metinde bulunabilen başlıklar) sadece
+  bölümün kendisi okunur. Başlığın metindeki yeri bulunamazsa sayfanın tamamı okunur.
+
+### Uzun doküman testi (`is_kanunu_testi.sh`)
+
+`degerlendirme/is_kanunu.py`, 4857 sayılı İş Kanunu ile 15 soruluk bir test hazırlar. Sorulardan 12'si
+kanunda cevabı olan sorulardır (bazıları günlük dille ya da küçük bir hesap gerektirecek şekilde
+sorulur), 3'ü ise kanunda cevabı olmayan sorulardır. Hazırlık sırasında:
+
+- Kanunun PDF'i mevzuat.gov.tr'den indirilir (yalnızca ilk seferde).
+- Her sorunun cevabı hangi maddedeyse, o maddenin PDF'teki sayfaları otomatik bulunur.
+- Doğru cevabın gerçekten o maddede yazdığı kontrol edilir. Kanun değişmişse uyarı verilir.
+- "Dokümanda olmayan" sorularda cevabın kanunda GEÇMEDİĞİ kontrol edilir.

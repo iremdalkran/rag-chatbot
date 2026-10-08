@@ -116,6 +116,18 @@ yerel modeli kullanır.
 bash ayar_karsilastir.sh ornekler/degerlendirme/sorular.xlsx --parca 1200 --topk 6 --modeller qwen3:14b --yontemler vector,pageindex
 ```
 
+**Uzun doküman testi (İş Kanunu):** İki yöntemi uzun bir mevzuat metniyle karşılaştırmak için:
+
+```bash
+bash is_kanunu_testi.sh
+```
+
+Bu komut 4857 sayılı İş Kanunu'nun resmi PDF'ini mevzuat.gov.tr'den indirir (herkese açık bir dosya;
+sizden hiçbir veri gönderilmez). Ardından 15 soruluk test dosyasını hazırlar ve iki yöntemi karşılaştırır.
+Sayfa numaraları kanun metninden otomatik bulunur. Sorular ve doğru cevaplar
+`degerlendirme/is_kanunu.py` dosyasındadır. Sadece soru dosyasını hazırlamak için:
+`bash is_kanunu_testi.sh --hazirla`.
+
 Ayrıntılar: [ARCHITECTURE.md](ARCHITECTURE.md#10-cevap-kalitesi-değerlendirmesi)
 
 ## Yedekleme
