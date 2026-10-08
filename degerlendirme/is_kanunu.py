@@ -61,8 +61,8 @@ DOCUMENT_QUESTIONS = [
 
 # (soru, metinde GEÇMEMESİ gereken ifadeler — geçiyorsa soru "dokümanda olmayan" sayılamaz)
 NOT_IN_DOCUMENT = [
-    ("Kıdem tazminatı her yıl için kaç günlük ücret üzerinden hesaplanır?", ["otuz günlük", "30 günlük"]),
-    ("2026 yılında geçerli asgari ücretin brüt tutarı ne kadardır?", ["brüt asgari ücret tutarı"]),
+    ("Emekli olabilmek için en az kaç gün prim ödemiş olmak gerekir?", ["prim gün", "emeklilik yaşı"]),
+    ("Yurt dışına görevlendirilen bir işçiye günlük ne kadar harcırah ödenir?", ["harcırah"]),
     ("İşten çıkarılan bir işçi kaç ay süreyle işsizlik ödeneği alabilir?", ["ay süreyle işsizlik ödeneği"]),
 ]
 

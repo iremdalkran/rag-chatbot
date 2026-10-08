@@ -354,6 +354,9 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
     log(f"   Ortalama süre: {summary['avg_seconds']} sn (ortanca {summary['median_seconds']}, "
         f"en uzun {summary['max_seconds']}); ilk kelime ortalaması {summary['avg_first']} sn; "
         f"algılanan bekleme ortalaması {summary['avg_wait']} sn")
+    problems = [r["reason"] for r in results if r["verdict"] == puanlama.VERDICT_UNCLEAR]
+    if problems:
+        log(f"\n⚠️  Hakem {len(problems)} soruyu puanlayamadı (bu sorular 0 puan sayıldı). İlk neden: {problems[0]}")
     log(f"\n📄 Rapor: {report}")
 
     # Hakem ayrı bir modelse onu da bellekten çıkar: arka arkaya çalıştırmalarda (karsilastir.py)
@@ -366,7 +369,7 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
         match = re.search(r"(\d+) parça", row["detail"] or "")
         chunk_count += int(match.group(1)) if match else 0
     return {"report": report, "summary": summary, "chunk_count": chunk_count, "settings": settings,
-            "prep_seconds": prep_seconds, "node_count": node_count}
+            "prep_seconds": prep_seconds, "node_count": node_count, "judge_problems": problems}
 
 
 def _trees(doc_ids: dict) -> dict:

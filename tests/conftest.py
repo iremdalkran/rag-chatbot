@@ -38,6 +38,7 @@ class FakeOllama:
         self.chat_requests = []
         self.judge_requests = []
         self.judge_verdict = "dogru"
+        self.judge_empty = None  # "json": katı JSON modunda boş cevap, "always": her zaman boş
         self.order = []
         self.pulled = []
         self.installed = []
@@ -77,6 +78,8 @@ class FakeOllama:
             return self.sql
         if "tarafsız bir hakemsin" in system:
             self.judge_requests.append(payload)
+            if self.judge_empty == "always" or (self.judge_empty == "json" and payload.get("format") == "json"):
+                return ""
             return json.dumps({"karar": self.judge_verdict, "gerekce": "test gerekçesi"})
         if "BAŞLAYAN bölüm başlıklarını" in last:  # PageIndex: başlık çıkarma
             self.toc_requests.append(payload)
