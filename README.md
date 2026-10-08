@@ -61,6 +61,34 @@ düzenleyin. Daha hızlı cevap için `qwen3:8b`, daha akıllı cevap için `qwe
 - İnternete açık bir adreste yayınlanacaksa önüne HTTPS koyun (ör. Caddy veya nginx) ve `.env` içinde
   `COOKIE_SECURE=true` yapın.
 
+## Cevap kalitesini ölçmek
+
+Sistemin gerçek modelle ne kadar doğru cevap verdiğini ölçmek için bir değerlendirme aracı var.
+Bu araç otomatik testlerden ayrıdır: testler kodun çalıştığını kontrol eder, bu araç ise cevapların
+**kalitesini** ölçer.
+
+1. `degerlendirme/sablon.xlsx` dosyasını kopyalayın ve sorularınızı yazın. Her satıra şunları girin:
+   soru, doğru cevap, kaynak dosya, kaynak sayfa ve soru türü (doküman / Excel / dokümanda olmayan).
+2. Soru dosyasını, cevapların geçtiği dokümanlar ve Excel dosyalarıyla **aynı klasöre** koyun.
+3. Çalıştırın:
+
+   ```bash
+   bash degerlendir.sh klasorum/sorular.xlsx
+   ```
+
+Hazır örnekle hemen denemek için: `bash degerlendir.sh ornekler/degerlendirme/sorular.xlsx`
+
+Her soru sisteme sorulur. Sonuçlar `degerlendirme/raporlar/` klasörüne bir Excel raporu olarak yazılır.
+Raporda her soru için şunlar bulunur:
+- Cevabın doğru olup olmadığı.
+- Doğru kaynağı bulup bulmadığı.
+- Kaç saniye sürdüğü.
+
+Raporun "Ayarlar" sayfasında, ölçümün hangi model ve ayarlarla yapıldığı yazar. Bir ayarı değiştirmeden
+önce ve sonra aynı soru dosyasıyla çalıştırıp raporları karşılaştırabilirsiniz.
+
+Ayrıntılar: [ARCHITECTURE.md](ARCHITECTURE.md#10-cevap-kalitesi-değerlendirmesi)
+
 ## Yedekleme
 
 Bütün veriler (kullanıcılar, sohbetler, dokümanlar, tablolar) `data/` klasöründedir. Yedek almak için
@@ -109,6 +137,7 @@ app/
   rag.py        kaynak gösteren cevap üretimi
   tabular.py    Excel/CSV → güvenli SQL analizi
   chats.py      sohbet geçmişi
+degerlendirme/  cevap kalitesi ölçümü (bkz. degerlendir.sh)
 static/         arayüz (internetten hiçbir şey yüklemez)
 tests/          otomatik testler
 ```

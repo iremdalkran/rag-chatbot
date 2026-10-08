@@ -588,7 +588,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 47 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 65 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
@@ -604,3 +604,83 @@ saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 - **Yerellik:** Arayüzde hiçbir dış internet adresi yok, bulut yapay zekâ kütüphanesi kalmamış.
 
 Çalıştırmak için: `.venv/bin/python -m pytest`
+
+---
+
+## 10. Cevap kalitesi değerlendirmesi
+
+Otomatik testler (`tests/`) sahte bir modelle **kodun doğru çalıştığını** kontrol eder. Ama "gerçek
+model, gerçek dokümanlarda ne kadar doğru cevap veriyor?" sorusunu cevaplayamazlar. Bunun için ayrı
+bir araç var: `degerlendirme/` klasörü ve `degerlendir.sh` komutu.
+
+### Nasıl çalışır?
+
+```mermaid
+flowchart TD
+    Q["📋 sorular.xlsx<br/>soru · doğru cevap · kaynak dosya ·<br/>kaynak sayfa · soru türü"] --> R
+    F["📂 Aynı klasördeki<br/>PDF / Word / Excel dosyaları"] --> R
+    R["degerlendir.sh"] --> T["Geçici, boş bir veri klasörü açılır<br/>(gerçek data/ klasörüne dokunulmaz)"]
+    T --> U["Uygulama arka planda başlar,<br/>dosyalar yüklenir"]
+    U --> A["Her soru yeni bir sohbette,<br/>Otomatik modda sorulur"]
+    A --> P["Puanlama<br/>• Hakem model: Doğru / Kısmen / Yanlış<br/>• Sayılar tuttu mu? (kurallı)<br/>• Yol doğru mu?<br/>• Kaynak bulundu / gösterildi mi?<br/>• Süre ve ilk kelime süresi"]
+    P --> X["📊 rapor_TARIH_MODEL.xlsx<br/>Özet · Sonuçlar · Ayarlar"]
+```
+
+1. **Gerçek kod yolu.** Uygulama arka planda gerçekten başlatılır ve sorular kullanıcının kullandığı
+   adrese gönderilir. Böylece yönlendirme, arama, SQL ve cevabın akışı aynen ölçülür.
+2. **Temiz başlangıç.** Her çalıştırma geçici, boş bir veri klasörüyle başlar ve iş bitince bu klasör
+   silinir. Sizin kullanıcılarınız, sohbetleriniz ve dokümanlarınız etkilenmez. Önceki bir ölçümün
+   kalıntısı da sonucu bozamaz.
+3. **Her soru yeni sohbette.** Sorular birbirini etkilemez.
+
+### Neler ölçülüyor?
+
+| Ölçüm | Nasıl? | Ne işe yarar? |
+|---|---|---|
+| **Karar** (Doğru / Kısmen / Yanlış) | Hakem model, sistemin cevabını beklenen cevapla karşılaştırır. Hakem de yereldir, veri dışarı çıkmaz. | Genel kalite. |
+| **Sayılar tuttu mu?** | Beklenen cevaptaki her sayı, sistemin cevabında veya sonuç tablosunda geçiyor mu? Modele dayanmayan, kurallı bir kontroldür. "3.500" ile "3500" aynı sayılır. | Hakemin yanılmasına karşı bağımsız bir kontrol. Özellikle Excel soruları için. |
+| **Yol doğru mu?** | Doküman sorusu dokümanlara, Excel sorusu SQL'e mi gitti? | Doküman/SQL kararının kalitesi. |
+| **Aramada bulundu mu?** | Doğru dosya ve sayfa, modele verilen parçalar arasında var mıydı? | Arama kalitesi. |
+| **Cevapta gösterildi mi?** | Doğru dosya ve sayfa, cevaptaki [n] kaynakları arasında var mı? Excel'de: SQL doğru tabloyu kullandı mı? | Atıf kalitesi. |
+| **Süre / İlk kelime** | Sorunun gönderilmesinden cevabın bitmesine kadar geçen süre, ve ilk kelimenin ekrana gelme süresi. | Kullanıcının bekleme deneyimi. |
+
+**Hatanın yerini bulmak:** "Aramada bulundu: evet, Karar: Yanlış" ise doğru bilgi modele verilmiş ama
+model doğru cevabı yazamamıştır. Çözüm modelde ya da yönlendirme komutundadır. "Aramada bulundu: hayır"
+ise sorun aramadadır. Çözüm parça boyutu, aranan parça sayısı ya da arama modelindedir.
+
+**"Dokümanda olmayan" sorular** sistemin **uydurup uydurmadığını** ölçer. Bu sorularda "Doğru", sistemin
+"bulamadım" demesi anlamına gelir. Bir doküman asistanı için en önemli ölçümlerden biridir.
+
+### Hakem modeli hakkında
+Varsayılan hakem, sohbet modelinin kendisidir. Bir model kendi cevaplarına karşı hoşgörülü olabilir.
+Bu yüzden rapor bu durumu açıkça yazar. Daha tarafsız bir ölçüm için farklı (tercihen daha büyük) bir
+model kullanılabilir:
+
+```bash
+bash degerlendir.sh sorular.xlsx --hakem-model qwen3:30b-a3b
+```
+
+Hakem de yanılabilir. Bu yüzden "Sayılar tuttu" kontrolü ve rapordaki "Hakemin gerekçesi" sütunu,
+şüpheli satırları gözle kontrol etmeyi kolaylaştırır.
+
+### Ayarların kaydedilmesi
+Raporun **Ayarlar** sayfasında şunlar yazar:
+- Kodun git sürümü.
+- Sohbet, arama ve hakem modelleri (boyut, nicemleme ve parmak izi dahil).
+- Ollama sürümü.
+- Bağlam penceresi, aranan parça sayısı, parça boyutu ve örtüşmesi.
+- Bilgisayar bilgisi.
+- Yüklenen dosyalar.
+
+Böylece "model değiştirince ne oldu?" ya da "parça boyutunu küçültünce arama iyileşti mi?" gibi
+sorular, iki raporu yan yana koyarak cevaplanabilir.
+
+### Dosyalar
+| Dosya | Görevi |
+|---|---|
+| `degerlendirme/sablon.xlsx` | Boş soru şablonu. "Soru türü" sütununda açılır liste ve "Nasıl doldurulur" sayfası var. |
+| `ornekler/degerlendirme/` | Hemen denenebilecek örnek set: 3 sayfalık örnek bir personel yönetmeliği, kahve tarihi PDF'i, satış Excel'i ve 14 soru. |
+| `degerlendirme/calistir.py` | Uygulamayı başlatır, dosyaları yükler, soruları sorar. |
+| `degerlendirme/puanlama.py` | Hakem, sayı, yol ve kaynak kontrolleri. |
+| `degerlendirme/rapor.py` | Excel raporunu yazar. |
+| `degerlendirme/ornek_set.py` | Şablonu ve örnek seti yeniden üretir. Excel sorularının doğru cevapları veriden hesaplanır. |
