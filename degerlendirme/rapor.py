@@ -106,7 +106,8 @@ def _header(ws, row: int, labels: List[str]) -> None:
         cell.alignment = Alignment(wrap_text=True, vertical="center")
 
 
-def write_report(path: Path, results: List[dict], settings: List[tuple], files: List[dict]) -> dict:
+def write_report(path: Path, results: List[dict], settings: List[tuple], files: List[dict],
+                 trees: Optional[dict] = None) -> dict:
     summary = summarize(results)
     wb = Workbook()
 
@@ -205,6 +206,22 @@ def write_report(path: Path, results: List[dict], settings: List[tuple], files: 
     st.column_dimensions["B"].width = 60
     st.column_dimensions["C"].width = 12
     st.column_dimensions["D"].width = 50
+
+    # --- İçindekiler (yalnızca PageIndex ile çalışıldıysa) ---
+    if trees:
+        ts = wb.create_sheet("İçindekiler")
+        _header(ts, 1, ["Doküman", "Bölüm", "Sayfalar", "Özet"])
+        row = 2
+        for filename, nodes in trees.items():
+            for node in nodes:
+                pages = str(node["start"]) if node["start"] == node["end"] else f"{node['start']}-{node['end']}"
+                values = (filename, "    " * node["depth"] + node["title"], pages, node["summary"])
+                for col, value in enumerate(values, start=1):
+                    ts.cell(row=row, column=col, value=value).alignment = Alignment(wrap_text=True, vertical="top")
+                row += 1
+        for col, width in zip("ABCD", (26, 50, 10, 80)):
+            ts.column_dimensions[col].width = width
+        ts.freeze_panes = "B2"
 
     wb.save(path)
     return summary

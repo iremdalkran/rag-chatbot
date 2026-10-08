@@ -244,3 +244,7 @@ def test_comparison_of_vector_and_pageindex_methods(ollama, tmp_path):
     pageindex_report = next(p for p in by_name["yontem-pageindex"]["reports"])
     settings = {r[0]: r[1] for r in load_workbook(pageindex_report)["Ayarlar"].iter_rows(values_only=True) if r[0]}
     assert settings["Doküman arama yöntemi (RAG_METHOD)"].startswith("PageIndex")
+    # Ağaç rapora yazıldı: hangi bölümlerin çıkarıldığı incelenebilir.
+    contents = list(load_workbook(pageindex_report)["İçindekiler"].iter_rows(values_only=True))
+    assert contents[0] == ("Doküman", "Bölüm", "Sayfalar", "Özet") and len(contents) > 1
+    assert "İçindekiler" not in load_workbook(by_name["temel"]["reports"][0]).sheetnames

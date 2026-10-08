@@ -235,7 +235,8 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
             detail = (f"{d['page_count']} sayfa, {d['chunk_count']} parça" if d["status"] == "ready" else d["error"])
             if d["tree_status"] == "ready":
                 node_count += d["tree_nodes"]
-                detail += f", içindekiler ağacı {d['tree_nodes']} bölüm"
+                origin = pageindex.ORIGIN_LABEL.get(d["tree_origin"], d["tree_origin"])
+                detail += f", içindekiler ağacı {d['tree_nodes']} bölüm ({origin})"
             elif d["tree_status"] == "error":
                 detail += f", içindekiler ağacı kurulamadı: {d['tree_error']}"
             file_rows.append({"name": name, "type": "doküman", "status": "hazır" if d["status"] == "ready" else "hata",
@@ -334,7 +335,7 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
     output_dir.mkdir(parents=True, exist_ok=True)
     safe_name = "".join(c if c.isalnum() else "-" for c in (label or config.CHAT_MODEL))
     report = output_dir / f"rapor_{started_at.strftime('%Y-%m-%d_%H%M%S')}_{safe_name}.xlsx"
-    summary = write_report(report, results, settings, file_rows)
+    summary = write_report(report, results, settings, file_rows, trees=_trees(doc_ids))
 
     log("\n📊 Özet")
     log(f"   Genel doğruluk puanı: %{summary['score'] * 100:.0f}   (toplam {summary['total']} soru)")
@@ -366,6 +367,19 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
         chunk_count += int(match.group(1)) if match else 0
     return {"report": report, "summary": summary, "chunk_count": chunk_count, "settings": settings,
             "prep_seconds": prep_seconds, "node_count": node_count}
+
+
+def _trees(doc_ids: dict) -> dict:
+    """Rapora yazılacak PageIndex ağaçları: {dosya adı: [bölüm satırları]} (ağaç kurulmadıysa boş)."""
+    from app import db, pageindex
+
+    if not doc_ids:
+        return {}
+    placeholders = ",".join("?" * len(doc_ids))
+    with db.get_conn() as conn:
+        rows = conn.execute(f"SELECT filename, tree_json FROM documents WHERE id IN ({placeholders}) "
+                            "AND tree_status = 'ready' ORDER BY id", list(doc_ids)).fetchall()
+    return {r["filename"]: pageindex.tree_rows(r["tree_json"]) for r in rows}
 
 
 def main(argv=None) -> int:

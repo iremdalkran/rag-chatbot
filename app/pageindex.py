@@ -389,6 +389,28 @@ def node_count(tree_json: Optional[str]) -> int:
     return len(list(_walk(tree.get("nodes") or [])))
 
 
+ORIGIN_LABEL = {"pdf-icindekiler": "PDF'in kendi içindekiler listesi", "model": "model başlıkları çıkardı",
+                "sayfa": "başlık bulunamadı, her sayfa bir bölüm"}
+
+
+def tree_origin(tree_json: Optional[str]) -> Optional[str]:
+    return _parse_json(tree_json or "").get("origin")
+
+
+def tree_rows(tree_json: Optional[str]) -> List[dict]:
+    """Ağacı düz bir liste olarak döner (rapor için): derinlik, başlık, sayfalar, özet."""
+    rows = []
+
+    def add(nodes, depth):
+        for node in nodes:
+            rows.append({"depth": depth, "title": node["title"], "start": node["start"], "end": node["end"],
+                         "summary": node.get("summary", "")})
+            add(node["nodes"], depth + 1)
+
+    add(_parse_json(tree_json or "").get("nodes") or [], 0)
+    return rows
+
+
 # --- 2. Arama ---
 
 SEARCH_PROMPT = """Bir soruyu cevaplamak için hangi doküman bölümlerinin okunması gerektiğine karar vereceksin.
