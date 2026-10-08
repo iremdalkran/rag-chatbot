@@ -157,6 +157,39 @@ def delete_user_files(user_id: int) -> None:
             path.unlink()
 
 
+MAX_SCHEMA_COLUMNS = 40
+MAX_LISTED_VALUES = 15
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _describe_column(conn, table: str, col: str, sample: pd.Series) -> str:
+    """
+    Modelin doğru SQL yazabilmesi için bir kolonu tarif eder. Az sayıda farklı değeri olan metin
+    kolonlarında değerlerin TAMAMINI listeler (ör. şehir: İstanbul, Ankara…) — böylece model
+    WHERE koşulunda değeri tahmin etmek yerine birebir doğru yazar. Sayılarda en küçük/en büyük
+    değeri, tarihlerde kullanılacak biçimi belirtir.
+    """
+    examples = [str(v) for v in sample.dropna().unique()[:3]]
+    line = f"  - {col}"
+    try:
+        if pd.api.types.is_numeric_dtype(sample):
+            low, high = conn.execute(f'SELECT MIN("{col}"), MAX("{col}") FROM "{table}"').fetchone()
+            return f"{line} (sayı, en küçük {low}, en büyük {high})"
+        if examples and all(_DATE_RE.match(e) for e in examples):
+            low, high = conn.execute(f'SELECT MIN("{col}"), MAX("{col}") FROM "{table}"').fetchone()
+            return (f"{line} (tarih, 'YYYY-AA-GG' ile başlayan metin, {str(low)[:10]} ile {str(high)[:10]} arası; "
+                    f"ay/yıl için strftime('%Y-%m', {col}) kullan)")
+        distinct = conn.execute(f'SELECT COUNT(DISTINCT "{col}") FROM "{table}"').fetchone()[0]
+        if distinct <= MAX_LISTED_VALUES:
+            values = [r[0] for r in conn.execute(
+                f'SELECT DISTINCT "{col}" FROM "{table}" WHERE "{col}" IS NOT NULL ORDER BY 1 LIMIT ?',
+                (MAX_LISTED_VALUES,))]
+            return f"{line} (metin, olası değerlerin tamamı: {', '.join(repr(str(v)) for v in values)})"
+        return f"{line} (metin, {distinct} farklı değer, örnek: {', '.join(examples)})"
+    except sqlite3.Error:
+        return f"{line} (örnek: {', '.join(examples)})"
+
+
 def schema_context(user_id: int) -> Optional[str]:
     datasets = list_datasets(user_id)[:8]
     if not datasets:
@@ -170,10 +203,7 @@ def schema_context(user_id: int) -> Optional[str]:
                 sample = pd.read_sql_query(f'SELECT * FROM "{table}" LIMIT 3', conn)
             except Exception:
                 continue
-            cols = []
-            for col in sample.columns:
-                examples = ", ".join(str(v) for v in sample[col].dropna().unique()[:3])
-                cols.append(f"  - {col} ({sample[col].dtype}) örnek: {examples}")
+            cols = [_describe_column(conn, table, col, sample[col]) for col in sample.columns[:MAX_SCHEMA_COLUMNS]]
             parts.append(
                 f"Tablo: {table}  (dosya: {ds['filename']}, {ds['row_count']} satır)\nKolonlar:\n"
                 + "\n".join(cols)
@@ -243,7 +273,10 @@ Kurallar:
 5. Toplam, ortalama gibi hesaplamalarda kolonlara anlaşılır takma adlar (AS) ver.
 6. Genel bir "grafik çiz / görselleştir" isteğinde en anlamlı kategori kolonu ile bir sayısal
    kolonu özetleyen bir sorgu yaz.
-7. Soru bu verilerle hiçbir şekilde cevaplanamıyorsa sadece NO_QUERY yaz.
+7. Metin karşılaştırmalarında, kolon tarifinde "olası değerlerin tamamı" listelenmişse değeri o listedeki
+   yazımla BİREBİR kullan (büyük/küçük harf ve Türkçe karakterler dahil).
+8. Soru bu verilerle hiçbir şekilde cevaplanamıyorsa (ör. tablolarda olmayan bir konu, bir doküman
+   içeriği ya da sohbet) sadece NO_QUERY yaz.
 
 Tablolar:
 {schema}"""
@@ -284,8 +317,13 @@ def _chart_style(question: str) -> str:
     return "bar"
 
 
-def infer_chart(df: pd.DataFrame, style: str = "bar") -> Optional[dict]:
-    """Kolon TİPLERİNE bakarak hangi kolonun etiket, hangilerinin sayısal seri olacağını seçer."""
+def infer_chart(df: pd.DataFrame, style: str = "bar", sql: str = "") -> Optional[dict]:
+    """
+    Kolon TİPLERİNE bakarak hangi kolonun etiket, hangilerinin sayısal seri olacağını seçer.
+    Sayısal kolonların ölçekleri çok farklıysa (ör. adet 2-13, tutar 160-400) hepsini aynı eksene
+    çizmek küçük olanı görünmez yapar; o zaman sadece sorgunun sıraladığı kolon çizilir (tabloda
+    diğerleri yine görünür).
+    """
     if df.empty or len(df.columns) < 2 or len(df) < 2:
         return None
     numeric = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
@@ -298,6 +336,12 @@ def infer_chart(df: pd.DataFrame, style: str = "bar") -> Optional[dict]:
         label, numeric = numeric[0], numeric[1:]
         if not numeric:
             return None
+    if len(numeric) > 1:
+        peaks = [float(df[c].abs().max() or 0) for c in numeric]
+        if max(peaks) > 10 * max(min(peaks), 1e-9):
+            ordered = re.search(r"order\s+by\s+\"?(\w+)", sql or "", flags=re.IGNORECASE)
+            chosen = ordered.group(1) if ordered and ordered.group(1) in numeric else numeric[peaks.index(max(peaks))]
+            numeric = [chosen]
     limit = 12 if style == "pie" else 25
     series_cols = numeric[:1] if style == "pie" else numeric[:4]
     return {
@@ -327,7 +371,8 @@ def ask(user_id: int, question: str, history: list) -> dict:
         except DataError as e:
             if str(e) == "NO_QUERY":
                 return {"answer": "Bu soruyu yüklediğiniz tablolarla ilişkilendiremedim. "
-                                  "Tablolardaki verilerle ilgili bir soru sorabilir misiniz?"}
+                                  "Tablolardaki verilerle ilgili bir soru sorabilir misiniz?",
+                        "no_query": True}
             error = str(e)
     else:
         raise DataError("Bu soru için çalışan bir sorgu oluşturamadım. Soruyu biraz farklı sormayı deneyin.")
@@ -337,6 +382,6 @@ def ask(user_id: int, question: str, history: list) -> dict:
         "answer": summary["answer"] or f"Sorgu {len(df)} satır döndürdü.",
         "sql": sql,
         "table": _table_payload(df),
-        "chart": infer_chart(df, _chart_style(question)),
+        "chart": infer_chart(df, _chart_style(question), sql),
         "suggestions": summary["suggestions"],
     }

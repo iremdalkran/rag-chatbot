@@ -228,8 +228,19 @@ sequenceDiagram
 2. **Yönlendirme: doküman mı, Excel mi?**
    - Kullanıcının sadece dokümanı varsa soru dokümanlara, sadece Excel'i varsa tablolara gider.
    - İkisi de varsa ve üstteki seçici **Otomatik**'teyse, modele kısa bir soru sorulur: "Bu soru
-     sayısal bir tablo sorusu mu, yoksa metin belgesi sorusu mu?"
-   - Kullanıcı seçiciden **Doküman** ya da **Veri**'yi seçerek bu kararı kendisi verebilir.
+     sayısal bir tablo sorusu mu, yoksa metin belgesi sorusu mu?" Model karar verirken şunları görür:
+     - Yüklü dokümanların adları.
+     - Tabloların adları ve sütunları.
+     - Takip sorularında, bir önceki soru ve onun nereden cevaplandığı. Örneğin "peki geçen ay?"
+       sorusu, önceki soru tablodan cevaplandıysa yine tabloya gider.
+   - Model tabloyu seçer ama SQL yazarken "bu soru tablolarla ilgili değil" derse, soru boş cevapla
+     bırakılmaz, **dokümanlarda aranır**.
+   - Ollama'ya ulaşılamazsa basit bir yedek kural devreye girer: soruda "toplam, ortalama, en çok,
+     grafik…" gibi kelimeler varsa tablo, yoksa doküman seçilir.
+   - Kullanıcı seçiciden **Doküman** ya da **Veri**'yi seçerek bu kararı kendisi verebilir. O zaman
+     yukarıdaki otomatik aktarma yapılmaz.
+   - Her cevabın üstünde nereden geldiğini gösteren küçük bir etiket görünür: **"Veri tablosu · SQL"**
+     ya da **"Dokümanlar"**.
 
 3. **Takip sorusu düzeltmesi.** Soru kısaysa (6 kelime veya daha az, örneğin "peki ya ikincisi?"),
    aramaya bir önceki soru da eklenir. Yoksa "ikincisi" kelimesiyle hiçbir şey bulunamazdı.
@@ -335,9 +346,15 @@ sequenceDiagram
 
 ### Adım adım
 
-1. **Tablo yapısı okunur.** Model tablonun tamamını görmez. Sadece en fazla 8 tablonun sütun adlarını,
-   veri türlerini ve her tablodan 3 örnek satırı görür. Bu, bir veritabanı uzmanına "elimde şu
-   sütunlar var" demek gibidir.
+1. **Tablo yapısı okunur.** Model tablonun tamamını görmez. En fazla 8 tablonun sütunlarını, her
+   sütun için şu kısa tarifle birlikte görür:
+   - **Sayı sütunları:** en küçük ve en büyük değer (ör. "tutar: 40 ile 250 arası").
+   - **Az çeşitli metin sütunları:** olası değerlerin **tamamı** (ör. "şehir: 'Ankara', 'İstanbul',
+     'İzmir'"). Böylece model `WHERE sehir = 'Istanbul'` gibi yanlış yazımla sonuçsuz bir sorgu
+     yazmaz, değeri listeden birebir alır.
+   - **Tarih sütunları:** tarih aralığı ve aylık/yıllık gruplama için kullanılacak formül.
+
+   Bu, bir veritabanı uzmanına "elimde şu sütunlar var, içlerinde şunlar yazıyor" demek gibidir.
 
 2. **Soru SQL'e çevrilir.** Model "sadece SELECT yaz, olmayan sütun uydurma, çok satır varsa sırala
    ve 100 ile sınırla" kurallarıyla tek bir sorgu yazar. Takip soruları için son 4 mesaj da verilir.
@@ -363,9 +380,12 @@ sequenceDiagram
    - Sayı içeren sütunlar grafiğin değerleri olur.
    - Soruda "pasta, dağılım, oran, yüzde" geçiyorsa **pasta**, "trend, zaman içinde, aylık" geçiyorsa
      **çizgi**, diğer durumlarda **sütun** grafiği çizilir.
+   - Sayı sütunlarının ölçekleri çok farklıysa (ör. adet 2-13, tutar 160-400), hepsi aynı grafiğe
+     çizilince küçük olanlar görünmez olur. Bu durumda grafikte sadece sorgunun sıraladığı sütun
+     gösterilir. Diğerleri tabloda durur.
 
-7. **Şeffaflık:** Arayüz **kullanılan SQL sorgusunu** da gösterir. Uzman bir kullanıcı modelin soruyu
-   doğru anlayıp anlamadığını buradan kontrol edebilir.
+7. **Şeffaflık:** Cevabın altında **"Kullanılan SQL"** başlığı vardır. Tıklanınca çalıştırılan sorgu
+   açılır. Uzman bir kullanıcı modelin soruyu doğru anlayıp anlamadığını buradan kontrol edebilir.
 
 ### Bu yaklaşımın sınırları
 - **Mantık hatası.** Model soruyu yanlış anlarsa sorgu çalışır ama yanlış şeyi hesaplar. Örneğin
@@ -502,8 +522,16 @@ Bölüm 5'te ayrıntılı anlatıldı. Değerlendirilen alternatifler:
 **Neden:** İkisi de yüklüyse, sorunun hangisine gideceğine model karar verir. Tek kelimelik bu karar
 yaklaşık 1 saniye sürer. Eski sürüm her soruyu önce Excel'e gönderiyordu. Bu yüzden PDF soruları
 neredeyse hiç cevaplanmıyordu.
-**Alternatif:** Anahtar kelime kuralları ("toplam", "ortalama" geçiyorsa Excel). Daha hızlı ama çok
-sık yanılır. Kullanıcı her zaman seçiciden modu elle de belirleyebilir.
+Karar hatalı olabileceği için iki güvenlik ağı vardır:
+- Tablo yolu "ilgisiz soru" derse soru dokümanlara aktarılır.
+- Cevabın üstündeki etiket kararı görünür kılar. Kullanıcı yanlış yolu fark ederse seçiciden modu
+  elle belirleyebilir.
+
+**Alternatifler:**
+- **Anahtar kelime kuralları** ("toplam", "ortalama" geçiyorsa Excel). Daha hızlı ama çok sık yanılır.
+  Bu yüzden sadece Ollama'ya ulaşılamadığında yedek olarak kullanılıyor.
+- **Her soruyu iki yoldan da çalıştırıp daha iyi cevabı seçmek.** Daha isabetli olabilir ama her
+  soruda bekleme süresini yaklaşık iki katına çıkarır.
 
 ### 7.11 Cevabın canlı akması
 
@@ -560,7 +588,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 40 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 47 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
