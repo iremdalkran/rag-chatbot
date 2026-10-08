@@ -76,6 +76,15 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     text, tokenize = 'unicode61 remove_diacritics 2'
 );
 
+-- Dokümanların sayfa metinleri (PageIndex bölüm okurken kullanır). Sayfası olmayan türlerde
+-- (Word, TXT) metin ~3000 karakterlik "sanal sayfalara" bölünür.
+CREATE TABLE IF NOT EXISTS doc_pages (
+    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    page_no INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    PRIMARY KEY (document_id, page_no)
+);
+
 CREATE TABLE IF NOT EXISTS datasets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -114,6 +123,26 @@ def get_conn():
         conn.close()
 
 
+# Sonradan eklenen kolonlar: eski veritabanlarına da eklenir (veri kaybı olmadan).
+_ADDED_COLUMNS = {
+    "documents": [
+        ("paged", "INTEGER NOT NULL DEFAULT 1"),      # 0: Word/TXT gibi gerçek sayfası olmayan dokümanlar
+        ("tree_json", "TEXT"),                         # PageIndex içindekiler ağacı
+        ("tree_status", "TEXT NOT NULL DEFAULT 'none'"),  # none | pending | processing | ready | error
+        ("tree_error", "TEXT"),
+        ("tree_seconds", "REAL"),
+    ],
+}
+
+
+def _migrate(conn) -> None:
+    for table, columns in _ADDED_COLUMNS.items():
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, definition in columns:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+
+
 def init_db() -> None:
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     config.TABLES_DIR.mkdir(parents=True, exist_ok=True)
@@ -122,11 +151,14 @@ def init_db() -> None:
         # WAL modu: okuma ve yazma aynı anda yapılabilir (birden çok kullanıcı için önemli).
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
+        _migrate(conn)
         # Sunucu bir doküman işlenirken kapandıysa o doküman "işleniyor"da takılı kalmasın.
         conn.execute(
             "UPDATE documents SET status = 'error', error = 'İşlem yarıda kaldı, lütfen tekrar yükleyin.' "
             "WHERE status = 'processing'"
         )
+        # Yarıda kalan ağaç kurulumları yeniden kuyruğa alınır (bkz. pageindex.resume_pending).
+        conn.execute("UPDATE documents SET tree_status = 'pending' WHERE tree_status = 'processing'")
         conn.commit()
     finally:
         conn.close()

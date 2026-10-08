@@ -96,6 +96,26 @@ bash ayar_karsilastir.sh ornekler/degerlendirme/sorular.xlsx
 
 Bu işlem 30-60 dakika sürer. Sonunda önerilen ayarları `.env` dosyasına yazılacak şekilde gösterir.
 
+## İki arama yöntemi: Vektör ve PageIndex
+
+Dokümanlarda iki farklı yolla arama yapılabilir. Seçim `.env` dosyasındaki tek bir ayarla yapılır:
+
+| Ayar | Nasıl çalışır? |
+|---|---|
+| `RAG_METHOD=vector` (varsayılan) | Doküman küçük parçalara bölünür; soruya anlamca ve kelimece en yakın parçalar bulunur. |
+| `RAG_METHOD=pageindex` | Her doküman için bir **içindekiler ağacı** (bölüm başlıkları, sayfaları, kısa özetleri) çıkarılır. Model, soruyu bu ağaca bakarak hangi bölümleri okuyacağına karar verir ve o sayfaları okur. |
+
+Ayarı değiştirip uygulamayı yeniden başlatmak yeterli. Ağacı olmayan dokümanlar için ağaç arka planda
+kendiliğinden kurulur (sol menüde "İçindekiler hazırlanıyor" yazar). Cevabın üstündeki etiket hangi
+yöntemin kullanıldığını gösterir ("Dokümanlar · PageIndex"). İki yöntem de yalnızca Ollama'daki
+yerel modeli kullanır.
+
+İki yöntemi aynı soru setiyle karşılaştırmak için:
+
+```bash
+bash ayar_karsilastir.sh ornekler/degerlendirme/sorular.xlsx --parca 1200 --topk 6 --modeller qwen3:14b --yontemler vector,pageindex
+```
+
 Ayrıntılar: [ARCHITECTURE.md](ARCHITECTURE.md#10-cevap-kalitesi-değerlendirmesi)
 
 ## Yedekleme

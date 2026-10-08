@@ -160,3 +160,33 @@ def chunk_pages(pages: List[Page], size: int = None, overlap: int = None) -> Lis
         if current:
             chunks.append(Chunk(len(chunks), page.number, " ".join(current)))
     return chunks
+
+
+def pdf_outline(data: bytes) -> List[dict]:
+    """PDF'in kendi içindekiler (yer imi) listesi: [{"level", "title", "page"}]. Yoksa boş liste.
+    PageIndex ağacı kurarken önce buna bakar; varsa modelin başlık çıkarmasına gerek kalmaz."""
+    from pypdf import PdfReader
+
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted:
+            reader.decrypt("")
+        result: List[dict] = []
+
+        def walk(items, level):
+            for item in items:
+                if isinstance(item, list):
+                    walk(item, level + 1)
+                    continue
+                try:
+                    page = reader.get_destination_page_number(item) + 1
+                except Exception:
+                    continue
+                title = str(getattr(item, "title", "") or "").strip()
+                if title and page >= 1:
+                    result.append({"level": level, "title": title[:200], "page": page})
+
+        walk(reader.outline, 1)
+        return result
+    except Exception:
+        return []

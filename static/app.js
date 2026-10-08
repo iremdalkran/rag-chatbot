@@ -351,10 +351,12 @@ function botMessage() {
   return { root, route, content, extras, tools, text: "", sources: [] };
 }
 
-function routeBadge(mode) {
-  return mode === "data"
-    ? el("span", { class: "route-badge", title: "Cevap, tablolarınızda çalıştırılan bir SQL sorgusuyla hesaplandı" }, icon("table"), "Veri tablosu · SQL")
-    : el("span", { class: "route-badge", title: "Cevap, dokümanlarınızda yapılan aramayla bulundu" }, icon("library"), "Dokümanlar");
+function routeBadge(mode, method) {
+  if (mode === "data")
+    return el("span", { class: "route-badge", title: "Cevap, tablolarınızda çalıştırılan bir SQL sorgusuyla hesaplandı" }, icon("table"), "Veri tablosu · SQL");
+  if (method === "pageindex")
+    return el("span", { class: "route-badge", title: "Model, dokümanların içindekiler ağacından ilgili bölümleri seçip okudu (PageIndex)" }, icon("library"), "Dokümanlar · PageIndex");
+  return el("span", { class: "route-badge", title: "Cevap, dokümanlarınızda yapılan aramayla bulundu" }, icon("library"), "Dokümanlar");
 }
 
 function showTyping(view, label) {
@@ -430,7 +432,7 @@ function finishBotMessage(view, message) {
   renderContent(view, view.text, view.sources.length, false);
   view.extras.replaceChildren();
   view.route.replaceChildren();
-  if (message.mode && !message.error) view.route.appendChild(routeBadge(message.mode));
+  if (message.mode && !message.error) view.route.appendChild(routeBadge(message.mode, message.method));
 
   const cited = view.sources.filter((s) => s.cited);
   if (cited.length) {
@@ -641,7 +643,7 @@ async function sendQuestion(text) {
             });
           }
         } else if (event.type === "route") {
-          view.route.replaceChildren(routeBadge(event.mode));
+          view.route.replaceChildren(routeBadge(event.mode, event.method));
           if (!view.text) showTyping(view, event.mode === "data" ? "SQL sorgusu hazırlanıyor ve çalıştırılıyor…" : "Dokümanlarda aranıyor…");
         } else if (event.type === "token") {
           view.text += event.text;
@@ -681,7 +683,7 @@ async function loadSources() {
     [state.docs, state.datasets] = await Promise.all([api("/api/documents"), api("/api/datasets")]);
   } catch (e) { return; }
   renderSources();
-  const processing = state.docs.some((d) => d.status === "processing");
+  const processing = state.docs.some((d) => d.status === "processing" || ["pending", "processing"].includes(d.tree_status));
   clearInterval(state.docPoll);
   if (processing) state.docPoll = setInterval(loadSources, 2000);
 }
@@ -703,6 +705,14 @@ function renderSources() {
     const meta = [status];
     if (doc.shared) meta.push(el("span", { class: "badge badge-accent", text: "Şirket" }));
     if (doc.page_count) meta.push(el("span", { text: doc.page_count + " sayfa" }));
+    // PageIndex içindekiler ağacının durumu (yalnızca bu yöntem açıksa ağaç kurulur).
+    if (doc.status === "ready" && ["pending", "processing"].includes(doc.tree_status))
+      meta.push(el("span", { class: "badge badge-warn", title: "PageIndex için bölüm başlıkları ve özetler çıkarılıyor" },
+        el("span", { class: "spinner" }), "İçindekiler hazırlanıyor"));
+    else if (doc.tree_status === "ready")
+      meta.push(el("span", { title: "PageIndex içindekiler ağacı hazır", text: doc.tree_nodes + " bölüm" }));
+    else if (doc.tree_status === "error")
+      meta.push(el("span", { class: "badge badge-danger", title: doc.tree_error || "", text: "İçindekiler kurulamadı" }));
     meta.push(el("span", { text: formatSize(doc.size_bytes) }));
     meta.push(el("span", { text: formatDate(doc.created_at) }));
     if (doc.shared && doc.owner_name) meta.push(el("span", { text: "· " + doc.owner_name }));

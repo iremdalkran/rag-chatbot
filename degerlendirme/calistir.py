@@ -153,7 +153,7 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
     klasörlerini kullanır)."""
     import httpx
 
-    from app import auth, config, llm
+    from app import auth, config, llm, pageindex
     from app.main import app
 
     # Uygulamanın kendi bilgi kayıtları ("doküman işlendi" vb.) ilerleme çıktısına karışmasın.
@@ -198,6 +198,7 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
         client.post("/api/auth/login", json={"email": "degerlendirme@yerel.test", "password": password}).raise_for_status()
 
         log(f"\n📂 {len(files)} dosya yükleniyor…")
+        prep_started = time.perf_counter()
         doc_ids = {}
         for path in files:
             with path.open("rb") as fh:
@@ -218,23 +219,34 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
                     else:
                         file_rows.append({"name": path.name, "type": "doküman", "status": "hata",
                                           "detail": r.json().get("detail", r.text)})
-        # Dokümanların arka planda işlenmesini bekle.
+        # Dokümanların arka planda işlenmesini (PageIndex açıksa içindekiler ağaçlarının da kurulmasını) bekle.
+        if pageindex.build_enabled() and doc_ids:
+            log("   PageIndex içindekiler ağaçları kuruluyor (doküman başına birkaç dakika sürebilir)…")
         while True:
             docs = {d["id"]: d for d in client.get("/api/documents").json()}
-            if all(docs[i]["status"] != "processing" for i in doc_ids):
+            if all(docs[i]["status"] != "processing" and docs[i]["tree_status"] not in ("pending", "processing")
+                   for i in doc_ids):
                 break
             time.sleep(0.5)
+        prep_seconds = round(time.perf_counter() - prep_started, 1)
+        node_count = 0
         for doc_id, name in doc_ids.items():
             d = docs[doc_id]
             detail = (f"{d['page_count']} sayfa, {d['chunk_count']} parça" if d["status"] == "ready" else d["error"])
+            if d["tree_status"] == "ready":
+                node_count += d["tree_nodes"]
+                detail += f", içindekiler ağacı {d['tree_nodes']} bölüm"
+            elif d["tree_status"] == "error":
+                detail += f", içindekiler ağacı kurulamadı: {d['tree_error']}"
             file_rows.append({"name": name, "type": "doküman", "status": "hazır" if d["status"] == "ready" else "hata",
                               "detail": detail})
         for row in file_rows:
             log(f"   {'✓' if row['status'] == 'hazır' else '✗'} {row['name']}: {row['detail']}")
+        log(f"   Hazırlık süresi (yükleme + işleme): {prep_seconds} sn")
 
         # 1. aşama: bütün soruları sor. Puanlama sonraya bırakılır; hakem farklı bir modelse
         # Ollama'nın her soruda iki modeli bellekte değiştirip durması böylece önlenir.
-        log(f"\n❓ {len(questions)} soru soruluyor (model: {config.CHAT_MODEL})…")
+        log(f"\n❓ {len(questions)} soru soruluyor (model: {config.CHAT_MODEL}, doküman arama yöntemi: {config.RAG_METHOD})…")
         replies = []
         for n, q in enumerate(questions, start=1):
             reply = _ask(client, q.text)
@@ -298,6 +310,20 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
         ("Ollama adresi", config.OLLAMA_URL),
         ("Bağlam penceresi (LLM_CONTEXT_TOKENS)", config.LLM_CONTEXT_TOKENS),
         ("Düşünme kapalı (LLM_DISABLE_THINKING)", "evet" if config.LLM_DISABLE_THINKING else "hayır"),
+        ("Doküman arama yöntemi (RAG_METHOD)",
+         "PageIndex (içindekiler ağacında akıl yürütme)" if config.RAG_METHOD == "pageindex"
+         else "Vektör (anlam + anahtar kelime araması)"),
+        ("Hazırlık süresi (dokümanların yüklenip işlenmesi)", f"{prep_seconds} sn"),
+    ]
+    if config.RAG_METHOD == "pageindex":
+        settings += [
+            ("PageIndex: soru başına en fazla bölüm (PAGEINDEX_MAX_NODES)", config.PAGEINDEX_MAX_NODES),
+            ("PageIndex: modele verilen en fazla metin (PAGEINDEX_MAX_CONTEXT_CHARS)", config.PAGEINDEX_MAX_CONTEXT_CHARS),
+            ("PageIndex: bölüm başına en fazla sayfa (PAGEINDEX_MAX_PAGES_PER_NODE)", config.PAGEINDEX_MAX_PAGES_PER_NODE),
+            ("PageIndex: ağaç aramasında düşünme (PAGEINDEX_THINK)", "açık" if config.PAGEINDEX_THINK else "kapalı"),
+            ("PageIndex: toplam bölüm sayısı", node_count),
+        ]
+    settings += [
         ("Aranan parça sayısı (RETRIEVAL_TOP_K)", config.RETRIEVAL_TOP_K),
         ("Parça boyutu (CHUNK_CHARS)", config.CHUNK_CHARS),
         ("Parça örtüşmesi (CHUNK_OVERLAP_CHARS)", config.CHUNK_OVERLAP_CHARS),
@@ -338,7 +364,8 @@ def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge
     for row in file_rows:
         match = re.search(r"(\d+) parça", row["detail"] or "")
         chunk_count += int(match.group(1)) if match else 0
-    return {"report": report, "summary": summary, "chunk_count": chunk_count, "settings": settings}
+    return {"report": report, "summary": summary, "chunk_count": chunk_count, "settings": settings,
+            "prep_seconds": prep_seconds, "node_count": node_count}
 
 
 def main(argv=None) -> int:

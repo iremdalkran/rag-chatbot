@@ -42,6 +42,33 @@ class FakeOllama:
         self.pulled = []
         self.installed = []
         self.down = False
+        self.toc_requests = []
+        self.summary_requests = []
+        self.tree_search_requests = []
+        self.picked_sections = None  # testler belirli bölümleri seçtirmek için doldurabilir
+
+    @staticmethod
+    def toc_headings(prompt: str) -> list:
+        """Her sayfanın ilk satırı kısa ise onu başlık sayar (gerçek model gibi metinden çıkarır)."""
+        headings = []
+        for number, body in re.findall(r"<sayfa_(\d+)>\n(.*?)\n</sayfa_\1>", prompt, re.DOTALL):
+            first = body.strip().split("\n")[0].strip()
+            if 0 < len(first) <= 60:
+                level = 2 if re.match(r"\d+\.\d+", first) else 1
+                headings.append({"seviye": level, "baslik": first, "sayfa": int(number)})
+        return headings
+
+    def pick_sections(self, prompt: str) -> list:
+        if self.picked_sections is not None:
+            return self.picked_sections
+        outline = prompt.split("Soru:")[0]
+        question = set(re.findall(r"\w+", prompt.split("Soru:")[1].split("Kurallar:")[0].lower()))
+        best, best_score = [], 0
+        for key, text in re.findall(r"^\s*(B\d+) (.*)$", outline, re.MULTILINE):
+            score = len(question & set(re.findall(r"\w+", text.lower())))
+            if score > best_score:
+                best, best_score = [key], score
+        return best
 
     def reply(self, payload: dict) -> str:
         system = payload["messages"][0]["content"]
@@ -51,6 +78,16 @@ class FakeOllama:
         if "tarafsız bir hakemsin" in system:
             self.judge_requests.append(payload)
             return json.dumps({"karar": self.judge_verdict, "gerekce": "test gerekçesi"})
+        if "BAŞLAYAN bölüm başlıklarını" in last:  # PageIndex: başlık çıkarma
+            self.toc_requests.append(payload)
+            return json.dumps({"bolumler": self.toc_headings(last)}, ensure_ascii=False)
+        if "bölümünü 1-2 cümleyle özetle" in last:  # PageIndex: bölüm özeti
+            self.summary_requests.append(payload)
+            body = last.split("Bölüm başlığı:", 1)[1].split("\n\n", 1)[-1]
+            return "Özet: " + " ".join(body.split()[:12])
+        if "hangi doküman bölümlerinin okunması" in last:  # PageIndex: ağaçta arama
+            self.tree_search_requests.append(payload)
+            return json.dumps({"dusunce": "test", "bolumler": self.pick_sections(last)}, ensure_ascii=False)
         if payload.get("format") == "json":
             return json.dumps({"answer": "En çok satan ürün elma.", "suggestions": ["a?", "b?", "c?"]})
         if "VERI ya da DOKUMAN" in last:

@@ -10,6 +10,7 @@ bu yüzden arayüzde sabit bir sunucu adresi yoktur ve CORS gerekmez.
 import json
 import logging
 import threading
+from contextlib import asynccontextmanager
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
@@ -28,7 +29,18 @@ log = logging.getLogger("app")
 COOKIE_NAME = "session"
 
 db.init_db()
-app = FastAPI(title="Yerel Doküman Asistanı", docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    # Yarıda kalan / yeni gereken PageIndex ağaçlarını arka planda kurmaya başla.
+    queued = documents.resume_tree_builds()
+    if queued:
+        log.info("%d doküman için PageIndex içindekiler ağacı kuruluyor", queued)
+    yield
+
+
+app = FastAPI(title="Yerel Doküman Asistanı", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
 
 # --- Güvenlik başlıkları ve basit CSRF koruması ---
@@ -91,6 +103,7 @@ def health():
     status = llm.health()
     status["setup_required"] = auth.user_count() == 0
     status["registration_open"] = auth.registration_open()
+    status["rag_method"] = config.RAG_METHOD
     return status
 
 
@@ -306,7 +319,7 @@ def ask(body: AskBody, user: dict = Depends(current_user)):
                     yield _event({"type": "done", "message": {"role": "assistant", "content": result["answer"], **extra}})
                     return
 
-            yield _event({"type": "route", "mode": "docs"})
+            yield _event({"type": "route", "mode": "docs", "method": config.RAG_METHOD})
             sources, stream = rag.answer_stream(user, question, history)
             recorder.sources = sources
             for piece in stream:
@@ -315,7 +328,7 @@ def ask(body: AskBody, user: dict = Depends(current_user)):
                 recorder.parts.append(piece)
                 yield _event({"type": "token", "text": piece})
             answer = "".join(recorder.parts).strip() or "Bir cevap oluşturulamadı, lütfen tekrar deneyin."
-            extra = {"mode": "docs", "sources": rag.cited_sources(answer, sources)}
+            extra = {"mode": "docs", "method": config.RAG_METHOD, "sources": rag.cited_sources(answer, sources)}
             recorder.save(answer, extra)
             yield _event({"type": "done", "message": {"role": "assistant", "content": answer, **extra}})
         except (llm.LLMError, tabular.DataError) as e:
@@ -367,7 +380,8 @@ class _AnswerRecorder:
         partial = "".join(self.parts).strip()
         if partial:
             self.save(partial + "\n\n*(durduruldu)*",
-                      {"mode": "docs", "sources": rag.cited_sources(partial, self.sources)})
+                      {"mode": "docs", "method": config.RAG_METHOD,
+                       "sources": rag.cited_sources(partial, self.sources)})
 
 
 # --- Dokümanlar ---
