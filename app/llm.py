@@ -196,6 +196,26 @@ def health() -> dict:
     return result
 
 
+def pull(model: str, progress=None) -> None:
+    """Modeli Ollama'ya indirir (yalnızca bir kez gerekir). progress(yüzde) ilerlemeyi bildirir."""
+    try:
+        with _client() as client:
+            with client.stream("POST", "/api/pull", json={"model": model, "stream": True}) as response:
+                if response.status_code >= 400:
+                    response.read()
+                    raise LLMError(f"'{model}' indirilemedi: {response.text[:200]}")
+                for line in response.iter_lines():
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    if data.get("error"):
+                        raise LLMError(f"'{model}' indirilemedi: {data['error']}")
+                    if progress and data.get("total"):
+                        progress(int(100 * data.get("completed", 0) / data["total"]))
+    except httpx.TransportError as e:
+        raise _connection_error() from e
+
+
 def unload(model: str) -> None:
     """Modeli Ollama'nın belleğinden hemen boşaltır (yer açmak için). Hata olursa sessizce geçer."""
     try:

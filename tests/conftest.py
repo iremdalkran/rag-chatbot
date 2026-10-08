@@ -39,6 +39,8 @@ class FakeOllama:
         self.judge_requests = []
         self.judge_verdict = "dogru"
         self.order = []
+        self.pulled = []
+        self.installed = []
         self.down = False
 
     def reply(self, payload: dict) -> str:
@@ -76,11 +78,16 @@ class FakeOllama:
             lines.append(json.dumps({"message": {"content": ""}, "done": True}))
             return httpx.Response(200, content="\n".join(lines).encode())
         if request.url.path == "/api/tags":
-            return httpx.Response(200, json={"models": [
+            return httpx.Response(200, json={"models": self.installed + [
                 {"name": "qwen3:14b", "digest": "abc123def4567890",
                  "details": {"parameter_size": "14.8B", "quantization_level": "Q4_K_M"}},
                 {"name": "bge-m3:latest", "details": {"parameter_size": "567M", "quantization_level": "F16"}},
                 {"name": "qwen3:30b-a3b", "details": {"parameter_size": "30.5B", "quantization_level": "Q4_K_M"}}]})
+        if request.url.path == "/api/pull":
+            self.pulled.append(payload["model"])
+            self.installed.append({"name": payload["model"], "details": {}})
+            lines = [{"status": "pulling", "total": 100, "completed": c} for c in (0, 50, 100)] + [{"status": "success"}]
+            return httpx.Response(200, content="\n".join(json.dumps(x) for x in lines).encode())
         if request.url.path == "/api/version":
             return httpx.Response(200, json={"version": "0.40.0"})
         return httpx.Response(404, json={"error": "not found"})

@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -140,9 +141,16 @@ def _ask(client, question: str) -> dict:
 
 def run(question_file: Path, files_dir: Path, output_dir: Path, judge_model: str = None,
         limit: int = None, log=print) -> Path:
-    """Değerlendirmeyi çalıştırır ve rapor dosyasının yolunu döner.
-    Uygulama modülleri (app.*) bu fonksiyon çağrılmadan önce yüklenmiş ve geçici veri klasörüne
-    yönlendirilmiş olmalıdır (main() bunu yapar; testler kendi geçici klasörlerini kullanır)."""
+    """Değerlendirmeyi çalıştırır ve rapor dosyasının yolunu döner."""
+    return run_evaluation(question_file, files_dir, output_dir, judge_model, limit, log)["report"]
+
+
+def run_evaluation(question_file: Path, files_dir: Path, output_dir: Path, judge_model: str = None,
+                   limit: int = None, log=print, label: str = "") -> dict:
+    """Değerlendirmeyi çalıştırır; {"report", "summary", "chunk_count", "settings"} döner.
+    Uygulama modülleri (app.*) bu fonksiyon çağrılmadan önce yüklenmiş ve geçici, boş bir veri
+    klasörüne yönlendirilmiş olmalıdır (main() ve karsilastir.py bunu yapar; testler kendi geçici
+    klasörlerini kullanır)."""
     import httpx
 
     from app import auth, config, llm
@@ -298,8 +306,8 @@ def run(question_file: Path, files_dir: Path, output_dir: Path, judge_model: str
         ("Python", platform.python_version()),
     ]
     output_dir.mkdir(parents=True, exist_ok=True)
-    safe_model = "".join(c if c.isalnum() else "-" for c in config.CHAT_MODEL)
-    report = output_dir / f"rapor_{started_at.strftime('%Y-%m-%d_%H%M%S')}_{safe_model}.xlsx"
+    safe_name = "".join(c if c.isalnum() else "-" for c in (label or config.CHAT_MODEL))
+    report = output_dir / f"rapor_{started_at.strftime('%Y-%m-%d_%H%M%S')}_{safe_name}.xlsx"
     summary = write_report(report, results, settings, file_rows)
 
     log("\n📊 Özet")
@@ -317,9 +325,20 @@ def run(question_file: Path, files_dir: Path, output_dir: Path, judge_model: str
         if shown:
             log(f"     {kind}: {shown}")
     log(f"   Ortalama süre: {summary['avg_seconds']} sn (ortanca {summary['median_seconds']}, "
-        f"en uzun {summary['max_seconds']}); ilk kelime ortalaması {summary['avg_first']} sn")
+        f"en uzun {summary['max_seconds']}); ilk kelime ortalaması {summary['avg_first']} sn; "
+        f"algılanan bekleme ortalaması {summary['avg_wait']} sn")
     log(f"\n📄 Rapor: {report}")
-    return report
+
+    # Hakem ayrı bir modelse onu da bellekten çıkar: arka arkaya çalıştırmalarda (karsilastir.py)
+    # bir sonraki cevap modeline yer açılsın.
+    if judge_model != config.CHAT_MODEL:
+        llm.unload(judge_model)
+
+    chunk_count = 0
+    for row in file_rows:
+        match = re.search(r"(\d+) parça", row["detail"] or "")
+        chunk_count += int(match.group(1)) if match else 0
+    return {"report": report, "summary": summary, "chunk_count": chunk_count, "settings": settings}
 
 
 def main(argv=None) -> int:

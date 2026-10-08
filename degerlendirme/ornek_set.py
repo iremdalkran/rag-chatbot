@@ -62,6 +62,22 @@ def excel_questions(df: pd.DataFrame) -> list:
     ]
 
 
+def hard_excel_questions(df: pd.DataFrame) -> list:
+    """Filtre + gruplama ya da iki dönemi karşılaştırma gerektiren sorular."""
+    months = pd.to_datetime(df["Tarih"]).dt.month
+    ankara_laptop = df[(df["Bölge"] == "Ankara") & (df["Ürün"] == "Laptop")]["Tutar"].sum()
+    january, march = df[months == 1]["Tutar"].sum(), df[months == 3]["Tutar"].sum()
+    direction = "arttı" if march > january else "azaldı"
+    src = "satislar.xlsx"
+    return [
+        ("Ankara'da Laptop satışlarından elde edilen toplam tutar nedir?",
+         f"{tr_number(ankara_laptop)} TL", src, "", TYPE_DATA),
+        ("Ocak ayından Mart ayına toplam satış tutarı arttı mı azaldı mı, ne kadar?",
+         f"{direction}: Ocak {tr_number(january)} TL, Mart {tr_number(march)} TL, fark {tr_number(abs(march - january))} TL",
+         src, "", TYPE_DATA),
+    ]
+
+
 DOCUMENT_QUESTIONS = [
     ("Beş yıldan az çalışan bir personelin yıllık izni kaç gündür?", "14 iş günü",
      "personel_yonetmeligi.pdf", 2, TYPE_DOC),
@@ -78,6 +94,29 @@ DOCUMENT_QUESTIONS = [
      "kahve_tarihi.pdf", 1, TYPE_DOC),
 ]
 
+# Dokümandaki kelimeleri kullanmayan, kuralı uygulamayı ya da küçük bir hesap yapmayı gerektiren sorular.
+HARD_DOCUMENT_QUESTIONS = [
+    ("7 yıldır bu şirketteyim, yıllık kaç gün tatil hakkım var?", "20 iş günü",
+     "personel_yonetmeligi.pdf", 2, TYPE_DOC),
+    ("Babam vefat etti; kaç gün izin alabilirim ve bu yıllık iznimden düşer mi?",
+     "3 gün ücretli mazeret izni; yıllık izinden düşülmez", "personel_yonetmeligi.pdf", 2, TYPE_DOC),
+    ("İşe yeni başladım, ilk ayımda evden çalışabilir miyim?",
+     "Hayır; deneme süresindeki (2 ay) çalışanlar uzaktan çalışamaz", "personel_yonetmeligi.pdf", 1, TYPE_DOC),
+    ("Ankara'ya 2 gecelik iş seyahatinde konaklamaya en fazla ne kadar harcayabilirim?",
+     "Gecelik 3.500 TL, iki gece için toplam 7.000 TL", "personel_yonetmeligi.pdf", 3, TYPE_DOC),
+    ("Hastalık raporu aldığım günlerin ücretini kim öder?", "İlk 2 günün ücretini şirket öder",
+     "personel_yonetmeligi.pdf", 2, TYPE_DOC),
+    ("Londra'daki kahvehanelere hangi ad verilmişti ve neden?",
+     "'Penny üniversiteleri'; bir bardak kahve karşılığında saatlerce entelektüel tartışmalara katılmak mümkündü",
+     "kahve_tarihi.pdf", 1, TYPE_DOC),
+]
+
+# Dokümandakine çok benzeyen ama cevabı dokümanda OLMAYAN sorular (en zor uydurma tuzakları).
+HARD_NOT_IN_DOCUMENTS = [
+    ("Yurt dışı iş seyahatlerinde gecelik konaklama üst sınırı nedir?", "", "", "", TYPE_NONE),
+    ("Doğum yapan bir çalışana kaç gün doğum izni verilir?", "", "", "", TYPE_NONE),
+]
+
 NOT_IN_DOCUMENTS = [
     ("Çalışanlara özel sağlık sigortası sağlanıyor mu?", "", "", "", TYPE_NONE),
     ("Şirketin 2025 yılı net kârı ne kadar?", "", "", "", TYPE_NONE),
@@ -92,7 +131,8 @@ def main() -> None:
     EXAMPLE_DIR.mkdir(parents=True, exist_ok=True)
     df = sales_table()
     df.to_excel(EXAMPLE_DIR / "satislar.xlsx", index=False, sheet_name="Satışlar")
-    rows = DOCUMENT_QUESTIONS + excel_questions(df) + NOT_IN_DOCUMENTS
+    rows = (DOCUMENT_QUESTIONS + excel_questions(df) + NOT_IN_DOCUMENTS
+            + HARD_DOCUMENT_QUESTIONS + hard_excel_questions(df) + HARD_NOT_IN_DOCUMENTS)
     write_question_file(EXAMPLE_DIR / "sorular.xlsx", rows)
     print(f"Örnek set: {EXAMPLE_DIR} ({len(rows)} soru)")
 
