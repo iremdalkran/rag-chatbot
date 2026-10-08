@@ -125,3 +125,12 @@ def test_missing_model_stops_with_clear_message(ollama, tmp_path):
     from degerlendirme.calistir import EvaluationError
     with pytest.raises(EvaluationError, match="ollama pull olmayan-model"):
         run(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, judge_model="olmayan-model", log=lambda *_: None)
+
+
+def test_all_questions_are_asked_before_any_judging(ollama, tmp_path):
+    # Hakem farklı bir modelse Ollama her soruda iki modeli değiştirmek zorunda kalmasın.
+    run(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, limit=4, log=lambda *_: None)
+    kinds = ["judge" if "tarafsız bir hakemsin" in r["messages"][0]["content"] else "ask"
+             for r in ollama.chat_requests]
+    first_judge = kinds.index("judge")
+    assert "ask" not in kinds[first_judge:] and kinds.count("judge") == 4

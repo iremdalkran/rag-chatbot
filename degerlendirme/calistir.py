@@ -224,38 +224,50 @@ def run(question_file: Path, files_dir: Path, output_dir: Path, judge_model: str
         for row in file_rows:
             log(f"   {'✓' if row['status'] == 'hazır' else '✗'} {row['name']}: {row['detail']}")
 
-        log(f"\n❓ {len(questions)} soru soruluyor (model: {config.CHAT_MODEL}, hakem: {judge_model})…")
-        results = []
+        # 1. aşama: bütün soruları sor. Puanlama sonraya bırakılır; hakem farklı bir modelse
+        # Ollama'nın her soruda iki modeli bellekte değiştirip durması böylece önlenir.
+        log(f"\n❓ {len(questions)} soru soruluyor (model: {config.CHAT_MODEL})…")
+        replies = []
         for n, q in enumerate(questions, start=1):
             reply = _ask(client, q.text)
+            replies.append(reply)
             message = reply["message"]
-            answer = message.get("content", "")
             mode = message.get("mode") or (reply["routes"][-1] if reply["routes"] else None)
-            sources = message.get("sources") or []
-            if reply["error"]:
-                verdict, reason = puanlama.VERDICT_ERROR, ""
-            else:
-                verdict, reason = puanlama.judge(q, answer, message.get("table"), judge_model)
-            retrieved_ok, cited_ok = puanlama.check_document_sources(q, sources)
-            if q.kind == TYPE_DATA:
-                cited_ok = puanlama.check_table_source(q, message.get("sql"), tables_by_file)
-            pages = ", ".join(map(str, sorted(q.source_pages))) if q.source_pages else ""
-            results.append({
-                "row": q.row, "kind": q.kind, "question": q.text, "expected": q.expected,
-                "answer": answer, "verdict": verdict, "reason": reason,
-                "numbers_ok": "—" if reply["error"] else puanlama.check_numbers(q.expected, answer, message.get("table")),
-                "expected_route": puanlama.MODE_LABEL[puanlama.EXPECTED_MODE.get(q.kind)],
-                "actual_route": puanlama.MODE_LABEL.get(mode, "—"),
-                "route_ok": puanlama.check_route(q, mode),
-                "expected_source": (q.source_file + (f" (s. {pages})" if pages else "")) if q.source_file else "—",
-                "retrieved_ok": retrieved_ok, "cited_ok": cited_ok,
-                "shown_sources": "; ".join(f"[{s['number']}] {s['filename']}" + (f" s.{s['page']}" if s.get("page") else "")
-                                           for s in sources if s.get("cited")),
-                "sql": message.get("sql") or "", "seconds": reply["seconds"],
-                "first_token_seconds": reply["first_token_seconds"], "error": reply["error"] or "",
-            })
-            mark = {"Doğru": "✓", "Kısmen": "~", "Yanlış": "✗"}.get(verdict, "!")
-            log(f"   [{n}/{len(questions)}] {mark} {verdict:<8} {reply['seconds']:>6.1f} sn  {q.text[:70]}")
+            status = "HATA" if reply["error"] else puanlama.MODE_LABEL.get(mode, "—")
+            log(f"   [{n}/{len(questions)}] {reply['seconds']:>6.1f} sn  {status:<8} {q.text[:70]}")
+
+    # 2. aşama: puanla.
+    log(f"\n⚖️  Cevaplar puanlanıyor (hakem: {judge_model})…")
+    results = []
+    for n, (q, reply) in enumerate(zip(questions, replies), start=1):
+        message = reply["message"]
+        answer = message.get("content", "")
+        mode = message.get("mode") or (reply["routes"][-1] if reply["routes"] else None)
+        sources = message.get("sources") or []
+        if reply["error"]:
+            verdict, reason = puanlama.VERDICT_ERROR, ""
+        else:
+            verdict, reason = puanlama.judge(q, answer, message.get("table"), judge_model)
+        retrieved_ok, cited_ok = puanlama.check_document_sources(q, sources)
+        if q.kind == TYPE_DATA:
+            cited_ok = puanlama.check_table_source(q, message.get("sql"), tables_by_file)
+        pages = ", ".join(map(str, sorted(q.source_pages))) if q.source_pages else ""
+        results.append({
+            "row": q.row, "kind": q.kind, "question": q.text, "expected": q.expected,
+            "answer": answer, "verdict": verdict, "reason": reason,
+            "numbers_ok": "—" if reply["error"] else puanlama.check_numbers(q.expected, answer, message.get("table")),
+            "expected_route": puanlama.MODE_LABEL[puanlama.EXPECTED_MODE.get(q.kind)],
+            "actual_route": puanlama.MODE_LABEL.get(mode, "—"),
+            "route_ok": puanlama.check_route(q, mode),
+            "expected_source": (q.source_file + (f" (s. {pages})" if pages else "")) if q.source_file else "—",
+            "retrieved_ok": retrieved_ok, "cited_ok": cited_ok,
+            "shown_sources": "; ".join(f"[{s['number']}] {s['filename']}" + (f" s.{s['page']}" if s.get("page") else "")
+                                       for s in sources if s.get("cited")),
+            "sql": message.get("sql") or "", "seconds": reply["seconds"],
+            "first_token_seconds": reply["first_token_seconds"], "error": reply["error"] or "",
+        })
+        mark = {"Doğru": "✓", "Kısmen": "~", "Yanlış": "✗"}.get(verdict, "!")
+        log(f"   [{n}/{len(questions)}] {mark} {verdict:<8} {q.text[:70]}")
 
     finished_at = datetime.now()
     settings = [
@@ -290,7 +302,17 @@ def run(question_file: Path, files_dir: Path, output_dir: Path, judge_model: str
     for kind, s in summary["by_type"].items():
         log(f"   • {kind:<18} doğru {s['correct']}, kısmen {s['partial']}, yanlış {s['wrong']}"
             + (f", hata {s['other']}" if s["other"] else "") + f"  → puan %{s['score'] * 100:.0f}")
-    log(f"   Ortalama süre: {summary['avg_seconds']} sn (en uzun {summary['max_seconds']} sn)")
+    def pct(value):
+        return "—" if value is None else f"%{value * 100:.0f}"
+
+    for kind, s in summary["by_type"].items():
+        checks = [("yol doğru", s["route"]), ("aramada bulundu", s["retrieved"]),
+                  ("cevapta gösterildi", s["cited"]), ("sayılar tuttu", s["numbers"])]
+        shown = ", ".join(f"{label} {pct(v)}" for label, v in checks if v is not None)
+        if shown:
+            log(f"     {kind}: {shown}")
+    log(f"   Ortalama süre: {summary['avg_seconds']} sn (ortanca {summary['median_seconds']}, "
+        f"en uzun {summary['max_seconds']}); ilk kelime ortalaması {summary['avg_first']} sn")
     log(f"\n📄 Rapor: {report}")
     return report
 
