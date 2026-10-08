@@ -248,3 +248,32 @@ def test_comparison_of_vector_and_pageindex_methods(ollama, tmp_path):
     contents = list(load_workbook(pageindex_report)["İçindekiler"].iter_rows(values_only=True))
     assert contents[0] == ("Doküman", "Bölüm", "Sayfalar", "Özet") and len(contents) > 1
     assert "İçindekiler" not in load_workbook(by_name["temel"]["reports"][0]).sheetnames
+
+
+# --- İş Kanunu (uzun doküman) test seti ---
+
+def test_is_kanunu_questions_get_pages_from_law_text(tmp_path, monkeypatch):
+    from app import ingest
+    from degerlendirme import is_kanunu
+    from degerlendirme.sorular import load_questions
+
+    answers = {number: words[0] for _, _, number, words in is_kanunu.DOCUMENT_QUESTIONS}
+    answers[53] = "kaynak metinde bu sayı yok"  # kanun değişmiş gibi: uyarı vermeli
+    pages, text = [], ""
+    for number in range(1, 121):
+        text += f"Konu {number}\nMadde {number} – Bu maddede {answers.get(number, 'genel hükümler')} yazar.\n"
+        if number % 3 == 0:
+            pages.append(ingest.Page(len(pages) + 1, text))
+            text = ""
+    (tmp_path / "is_kanunu.pdf").write_bytes(b"%PDF-1.4 sahte")
+    monkeypatch.setattr(ingest, "extract_pages", lambda name, data: pages)
+    monkeypatch.setattr(is_kanunu, "download", lambda *a, **k: pytest.fail("dosya varken indirilmemeli"))
+    messages = []
+    path = is_kanunu.prepare(tmp_path, log=messages.append)
+
+    questions = load_questions(path)
+    assert len(questions) == 15
+    weekly = next(q for q in questions if q.text.startswith("Haftalık çalışma"))
+    assert weekly.source_file == "is_kanunu.pdf" and weekly.source_pages == {21}  # Madde 63 → 21. sayfa
+    assert sum(q.kind == "dokümanda olmayan" for q in questions) == 3
+    assert any("Madde 53" in m for m in messages) and not any("Madde 63" in m for m in messages)
