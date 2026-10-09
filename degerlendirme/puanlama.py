@@ -21,7 +21,7 @@ from typing import Iterable, List, Optional, Set
 
 from app import llm
 
-from .sorular import TYPE_DATA, TYPE_DOC, Question
+from .sorular import TYPE_DATA, TYPE_DOC, TYPE_NONE, Question
 
 VERDICT_CORRECT = "Doğru"
 VERDICT_PARTIAL = "Kısmen"
@@ -153,6 +153,12 @@ def _table_preview(table: Optional[dict], limit: int = 10) -> str:
 
 def judge(question: Question, answer: str, table: Optional[dict], model: Optional[str]) -> tuple:
     """(karar, gerekçe). Hakem modeli yerelde çalışır; veri dışarı çıkmaz."""
+    # Sistemin sabit "bulamadım" cevabı model sorulmadan puanlanır: cevabı kaynakta olan soruda yanlış,
+    # kaynakta olmayan soruda doğrudur. (Hakem model bu durumda zaman zaman yanlış karar verdi.)
+    if _says_not_found(answer):
+        if question.kind == TYPE_NONE:
+            return VERDICT_CORRECT, "Sistem bilginin kaynaklarda olmadığını söyledi."
+        return VERDICT_WRONG, "Sistem bilgiyi bulamadığını söyledi; oysa cevap kaynakta var."
     parts = [
         f"Soru türü: {question.kind}",
         f"Soru: {question.text}",
@@ -175,15 +181,22 @@ def judge(question: Question, answer: str, table: Optional[dict], model: Optiona
         parsed = _parse_verdict(result["content"])
         if parsed:
             return parsed
-    # İki deneme de okunamadı: kararı modelin düşünme metninde arar, yoksa nedenini rapora yazar.
-    parsed = _parse_verdict(attempts[-1]["thinking"])
-    if parsed:
-        return parsed
+    # İki deneme de okunamadı. Modelin düşünme metninden karar okunmaz: orada kurallar ve olasılıklar
+    # tartışıldığı için yanlış kelimeyi yakalayabiliriz. Nedeni rapora yazılır.
     last = attempts[-1]
     if not last["content"]:
         return VERDICT_UNCLEAR, (f"Hakem boş cevap verdi (bitiş nedeni: {last['done_reason'] or 'bilinmiyor'}, "
                                  f"düşünme metni: {len(last['thinking'])} karakter)")
     return VERDICT_UNCLEAR, f"Hakemin cevabı anlaşılamadı: {last['content'][:200]}"
+
+
+_NOT_FOUND_RE = re.compile(r"(bulamad[iı]m|bulunmamaktad[iı]r|yer almamaktad[iı]r|bilgi (yok|bulunmuyor))")
+
+
+def _says_not_found(answer: str) -> bool:
+    """Kısa ve sadece "bulamadım" diyen bir cevap mı? (Uzun cevaplar hakeme bırakılır.)"""
+    answer = (answer or "").strip().lower()
+    return bool(answer) and len(answer) <= 160 and bool(_NOT_FOUND_RE.search(answer))
 
 
 _VERDICT_RE = re.compile(r"\b(dogru|kismen|yanlis)\b")
