@@ -309,3 +309,20 @@ def test_unscored_questions_are_reported_on_screen(ollama, tmp_path):
     outcome = run_evaluation(EXAMPLES / "sorular.xlsx", EXAMPLES, tmp_path, "qwen3:30b-a3b", limit=2, log=lines.append)
     assert len(outcome["judge_problems"]) == 2
     assert any("Hakem 2 soruyu puanlayamadı" in line for line in lines)
+
+
+def test_not_found_answer_is_scored_without_judge(ollama):
+    from degerlendirme import puanlama
+    from degerlendirme.sorular import Question
+    not_found = "Yüklenen dokümanlarda bu bilgiyi bulamadım."
+    doc_q = Question(2, "Yılda kaç saat fazla çalışma?", "270 saat", "a.pdf", {24}, "doküman")
+    none_q = Question(3, "Harcırah ne kadar?", "", "", None, "dokümanda olmayan")
+    ollama.judge_verdict = "dogru"  # hakem yanlışlıkla "doğru" dese bile
+    assert puanlama.judge(doc_q, not_found, None, "qwen3:30b-a3b")[0] == "Yanlış"
+    assert puanlama.judge(none_q, not_found, None, "qwen3:30b-a3b")[0] == "Doğru"
+    assert not ollama.judge_requests
+    # Uzun, tahmin içeren cevaplar yine hakeme gider.
+    puanlama.judge(none_q, "Kaynaklarda bulamadım ama genelde günlük 1.500 TL civarında harcırah ödenir; "
+                           "bu tutar şirketten şirkete değişir ve her yıl güncellenir, ayrıca konaklama dahil "
+                           "değildir.", None, "qwen3:30b-a3b")
+    assert len(ollama.judge_requests) == 1

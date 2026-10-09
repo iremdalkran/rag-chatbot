@@ -38,8 +38,8 @@ DOCUMENT_QUESTIONS = [
     ("7 yıldır aynı işyerinde çalışıyorum. Yılda kaç gün ücretli izin hakkım var?",
      "20 gün (kıdemi beş yıldan fazla, on beş yıldan az olanlar için).", 53, ["yirmi gün", "20 gün"]),
     ("Doğum yapacak bir kadın işçi doğumdan önce ve sonra toplam kaç hafta izin kullanır?",
-     "Toplam 16 hafta: doğumdan önce 8, doğumdan sonra 8 hafta. Çoğul gebelikte doğumdan önceki süreye "
-     "2 hafta eklenir.", 74, ["onaltı", "on altı", "16"]),
+     "Toplam 24 hafta: doğumdan önce 8, doğumdan sonra 16 hafta (kanunun güncel metni).", 74,
+     ["yirmidört", "yirmi dört", "24 hafta"]),
     ("İki buçuk yıldır çalışan bir işçinin sözleşmesini feshetmek isteyen işveren kaç hafta önceden "
      "bildirimde bulunmalıdır?",
      "6 hafta önceden (işi bir buçuk yıldan üç yıla kadar sürmüş işçi için).", 17, ["altı hafta", "6 hafta"]),
