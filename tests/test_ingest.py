@@ -66,3 +66,25 @@ def test_chunks_respect_size_overlap_and_pages():
 def test_very_long_word_does_not_loop_forever():
     chunks = ingest.chunk_pages([ingest.Page(None, "a" * 5000)], size=1000, overlap=200)
     assert sum(len(c.text) for c in chunks) == 5000
+
+
+def test_law_text_is_chunked_by_article_with_article_title():
+    from app import documents, ingest
+    body = "Bu madde hükmüne göre işveren ve işçi arasındaki ilişki düzenlenir. " * 8
+    pages = [
+        ingest.Page(1, "İŞ KANUNU\nBİRİNCİ BÖLÜM\nGenel Hükümler\nAmaç\nMadde 1 – " + body + "\nTanımlar\nMadde 2 – " + body),
+        ingest.Page(2, "Madde 3 – " + body + "\nAra dinlenmesi\nMadde 4 – Dört saatten fazla işlerde yarım saat. "
+                    + body + "\nGece çalışması\nMadde 5 – Yedi buçuk saati geçemez."),
+    ]
+    chunks = documents.make_chunks(pages)
+    article_chunks = [c for c in chunks if "Madde 4 –" in c.text]
+    assert article_chunks and all(c.text.startswith("[Madde 4 – Ara dinlenmesi]") for c in article_chunks)
+    assert article_chunks[0].page == 2
+    # Hiçbir parça iki maddenin metnini birlikte içermez.
+    import re
+    assert all(len(re.findall(r"Madde \d+ –", c.text)) <= 2 for c in chunks)  # başlık + kendi maddesi
+    assert not any("Madde 4 –" in c.text and "Madde 5 –" in c.text for c in chunks)
+    assert [c.index for c in chunks] == list(range(len(chunks)))
+    # Kanun olmayan metin eskisi gibi bölünür.
+    plain = [ingest.Page(1, "Kahve tarihi. " * 50)]
+    assert [c.text for c in documents.make_chunks(plain)] == [c.text for c in ingest.chunk_pages(plain)]

@@ -83,7 +83,7 @@ def _process(doc_id: int, filename: str, data: bytes) -> None:
     try:
         pages = ingest.extract_pages(filename, data)
         outline = ingest.pdf_outline(data) if filename.lower().endswith(".pdf") else []
-        chunks = ingest.chunk_pages(pages)
+        chunks = make_chunks(pages)
         vectors = llm.embed([c.text for c in chunks])
         with db.get_conn() as conn:
             # Bu arada kullanıcı dokümanı sildiyse yazmadan çık.
@@ -118,6 +118,32 @@ def resume_tree_builds() -> int:
     for doc_id in pending:
         _executor.submit(pageindex.build_tree, doc_id)
     return len(pending)
+
+
+def make_chunks(pages: List["ingest.Page"]) -> List["ingest.Chunk"]:
+    """Dokümanı arama parçalarına böler. Kanun/yönetmelik gibi maddeli metinlerde parçalar madde
+    sınırından bölünür ve her parçanın başına maddenin adı yazılır ("Madde 68 – Ara dinlenmesi").
+    Böylece bir parçada iki maddenin metni karışmaz; hem arama hem cevap yazan model hangi maddeyi
+    okuduğunu bilir. Diğer dokümanlar eskisi gibi bölünür."""
+    texts = [p.text for p in pages]
+    headings = sorted(pageindex._legal_headings(texts), key=lambda h: (h["page"], h["offset"]))
+    if not headings:
+        return ingest.chunk_pages(pages)
+    # Her başlık, bir sonraki başlığa kadar olan metni kapsar; ilk başlıktan önceki metin başlıksızdır.
+    spans = [("", 0, 0)] + [(h["title"], h["page"] - 1, h["offset"]) for h in headings]
+    chunks: List[ingest.Chunk] = []
+    for i, (title, page_idx, offset) in enumerate(spans):
+        end_page, end_off = (spans[i + 1][1], spans[i + 1][2]) if i + 1 < len(spans) else (len(pages) - 1, None)
+        segments = []
+        for idx in range(page_idx, end_page + 1):
+            start = offset if idx == page_idx else 0
+            stop = end_off if idx == end_page and end_off is not None else len(texts[idx])
+            if texts[idx][start:stop].strip():
+                segments.append(ingest.Page(pages[idx].number, texts[idx][start:stop]))
+        for chunk in ingest.chunk_pages(segments):
+            text = chunk.text if not title or chunk.text.startswith(title.split(" – ")[0]) else f"[{title}] {chunk.text}"
+            chunks.append(ingest.Chunk(len(chunks), chunk.page, text))
+    return chunks
 
 
 def _mark_error(doc_id: int, message: str) -> None:
