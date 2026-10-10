@@ -497,8 +497,15 @@ isabetli olur ama her soruya ek bekleme süresi ekler.
   sadece 2 parça kullanılması cevapları zayıflatıyordu. Çok büyük parçalar ise modele gereksiz metin
   yükler ve aramayı bulanıklaştırır.
 - **Sayfa içinde kalma:** Kaynak gösterirken sayfa numarası verebilmek için.
-- **Alternatifler:** Başlık ve bölüm yapısına göre bölmek, belgenin yapısını daha iyi korur. Ancak PDF'lerde
-  başlık bilgisi çoğunlukla güvenilir şekilde okunamaz.
+- **Kanun ve yönetmelikler:** Metinde "MADDE 12 –" kalıbı en az 5 kez geçiyorsa parçalar madde sınırından
+  bölünür. Her parçanın başına maddenin adı yazılır, örneğin "[Madde 68 – Ara dinlenmesi]". Böylece bir
+  parçada iki maddenin metni karışmaz; hem arama hem cevabı yazan model hangi maddeyi okuduğunu bilir.
+  İş Kanunu testinde vektör yöntemi doğru maddeyi her soruda bulmuştu, ama iki soruda sayıyı yanlış okumuştu
+  (270 yerine 225 saat, yarım saat yerine 15 dakika). Bu değişiklik o hatalar için yapıldı. Daha önce
+  yüklenmiş dokümanlarda etkili olması için doküman silinip yeniden yüklenmelidir.
+- **Alternatifler:** Başlık ve bölüm yapısına göre bölmek, belgenin yapısını daha iyi korur. Ancak sıradan
+  PDF'lerde başlık bilgisi çoğunlukla güvenilir şekilde okunamaz; bu yüzden yalnızca yapısı kesin olan
+  maddeli metinlerde uygulanır.
 
 ### 7.8 Kaynak gösterme: modele numara yazdırmak
 
@@ -591,7 +598,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 89 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 94 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
@@ -846,6 +853,29 @@ dışarı çıkmıyor.
   raporunda "Hazırlık süresi" olarak ayrıca yazılır.
 - **Okuma birimi:** Yeri tam bilinen bölümlerde (kanun maddeleri, metinde bulunabilen başlıklar) sadece
   bölümün kendisi okunur. Başlığın metindeki yeri bulunamazsa sayfanın tamamı okunur.
+
+### Ölçüm sonucu: neden varsayılan vektör?
+
+İki yöntem 15 soruluk İş Kanunu testiyle (55 sayfa, 121 madde) karşılaştırıldı. Değerlendirme
+aracındaki iki hata düzeltildikten sonraki sonuç:
+
+| | Vektör | PageIndex |
+|---|---|---|
+| Doğruluk | **%87** (13/15) | %80 (12/15) |
+| Doğru maddeyi bulma | **%100** | %75 |
+| Soru başına bekleme | **~10 sn** | ~56 sn |
+| Dokümanı hazırlama | **~9 sn** | ~28 dk |
+
+PageIndex, yanlış cevapladığı üç soruda içindekiler ağacında yanlış maddeyi seçti. Vektör yöntemi doğru
+maddeyi her soruda buldu; iki hatası, bulduğu metindeki sayıyı yanlış okumasından geldi. Bu nedenle
+varsayılan yöntem vektör olarak kaldı. PageIndex bir ayar olarak durmaya devam ediyor.
+
+Bu ölçümden çıkan iki ders:
+- **Hakeme körü körüne güvenilmemeli.** Hakem model bir çalıştırmada her soruya boş cevap verdi, başka bir
+  çalıştırmada "bulamadım" cevaplarını doğru saydı. Bu yüzden "bulamadım" cevapları artık kuralla
+  puanlanıyor ve hakemin puanlayamadığı sorular ekranda uyarı olarak gösteriliyor.
+- **Cevap anahtarı da yanılabilir.** Doğum izni sorusunda iki sistem de kanunun güncel metnini (8 + 16 =
+  24 hafta) aktardı; eski olan, benim yazdığım beklenen cevaptı.
 
 ### Uzun doküman testi (`is_kanunu_testi.sh`)
 
