@@ -598,7 +598,7 @@ yeniden yüklenmesi gerekir.
 
 ## 9. Testler
 
-`tests/` klasöründeki 94 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
+`tests/` klasöründeki 95 otomatik test, gerçek Ollama olmadan, onu taklit eden sahte bir sunucuyla
 saniyeler içinde çalışır. Kontrol ettikleri başlıca konular:
 
 - **Kullanıcı ayrımı:** Kullanıcılar birbirinin dokümanını, tablosunu ve sohbetini göremiyor ve
@@ -876,6 +876,28 @@ Bu ölçümden çıkan iki ders:
   puanlanıyor ve hakemin puanlayamadığı sorular ekranda uyarı olarak gösteriliyor.
 - **Cevap anahtarı da yanılabilir.** Doğum izni sorusunda iki sistem de kanunun güncel metnini (8 + 16 =
   24 hafta) aktardı; eski olan, benim yazdığım beklenen cevaptı.
+
+### Deney: resmî PageIndex kütüphanesi (`pageindex_resmi_testi.sh`)
+
+Uygulamadaki PageIndex (`app/pageindex.py`) resmî kütüphaneyi kullanmaz; yöntemin bizim yazdığımız
+bir uyarlamasıdır. Resmî kütüphaneyle (`pip install pageindex`) karşılaştırmak için ayrı bir deney var:
+
+- Kütüphane uygulamaya eklenmedi. Ayrı bir Python ortamına (`.venv-pageindex`,
+  `requirements-pageindex.txt`) kurulur, çünkü bağımlılıkları (LiteLLM, OpenAI Agents SDK, MCP)
+  uygulamanın web sunucusu kütüphanesiyle çakışıyor.
+- **Tamamen yerel:** Kütüphane yerel moda sabitlenir (`PageIndexLocalClient`, bulut anahtarı yok). Bütün
+  model çağrıları Ollama'nın OpenAI uyumlu arayüzüne (`localhost:11434/v1`) gider. Fiyat listesi
+  indirme ve izleme kaydı gönderme (tracing) kapatılır. Deney, dış ağ bağlantısı tamamen kesikken de
+  çalıştırılıp denendi.
+- **Bağlam penceresi:** Ollama'nın OpenAI uyumlu arayüzü bağlam boyutu ayarı almaz (varsayılan küçük).
+  Bu yüzden modelin 16.384 tokenlık bir kopyası tanımlanır (`qwen3-30b-a3b-pi16k`); bu ek disk yeri
+  harcamaz.
+- **Hız farkının asıl nedeni:** Resmî "Flash", ağacın yapısını modelsiz çıkarır. Bizim kanun ağacımız
+  da modelsiz çıkarılıyordu ("mevzuat" yolu). 28 dakikanın neredeyse tamamı, 145 bölümün özetini yerel
+  modelin **tek tek** yazmasından geliyordu. Resmî kütüphane de özetleri modelle yazar ("index model only
+  summarizes and refines"). README'deki saniyeler, bulut modelleri ve aynı anda onlarca istekle elde
+  edilmiş. Deneyde özetler, düşünme adımı kapalı ve aynı anda 2 istekle yazdırılır.
+- Adil karşılaştırma için betik, vektör yöntemimizi de aynı arama modeliyle (qwen3:30b-a3b) ölçer.
 
 ### Uzun doküman testi (`is_kanunu_testi.sh`)
 

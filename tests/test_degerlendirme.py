@@ -326,3 +326,31 @@ def test_not_found_answer_is_scored_without_judge(ollama):
                            "bu tutar şirketten şirkete değişir ve her yıl güncellenir, ayrıca konaklama dahil "
                            "değildir.", None, "qwen3:30b-a3b")
     assert len(ollama.judge_requests) == 1
+
+
+# --- Resmî PageIndex SDK deneyi ---
+
+def test_official_pageindex_answer_and_read_pages_are_extracted():
+    from degerlendirme import pageindex_resmi
+
+    class Stream:
+        events = iter([
+            {"type": "tool_call", "call_id": "a", "name": "get_document_structure", "arguments": {}},
+            {"type": "tool_call", "call_id": "b", "name": "get_page_content", "arguments": {"pages": "99"}},
+            {"type": "tool_result", "call_id": "b", "name": "get_page_content",
+             "output": '{"error": "All requested pages are out of range"}'},
+            {"type": "tool_call", "call_id": "c", "name": "get_page_content", "arguments": '{"pages": "24-25"}'},
+            {"type": "tool_result", "call_id": "c", "name": "get_page_content", "output": "Madde 41 ..."},
+            {"type": "answer", "delta": "Yılda en fazla 270 saat "},
+            {"type": "answer", "delta": '<cite doc="is_kanunu.pdf" page="24"/>.'},
+        ])
+
+    class Client:
+        def chat(self, question, **kwargs):
+            assert kwargs["citations"] is True and kwargs["doc_id"] == "d1"
+            return Stream()
+
+    reply = pageindex_resmi._ask(Client(), "d1", "Fazla çalışma sınırı?")
+    assert reply["answer"] == "Yılda en fazla 270 saat ."
+    assert reply["read"] == {24, 25} and reply["cited"] == {24} and reply["tool_calls"] == 3
+    assert reply["error"] is None and reply["first"] is not None
