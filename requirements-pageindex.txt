@@ -1,0 +1,7 @@
+# Sadece resmî PageIndex deneyi için (pageindex_resmi_testi.sh). Uygulamanın kendisi bunlara ihtiyaç duymaz;
+# ayrı bir Python ortamına (.venv-pageindex) kurulur.
+pageindex==0.2.22
+python-dotenv==1.1.0
+httpx==0.28.1
+numpy>=2.0,<3
+openpyxl==3.1.5

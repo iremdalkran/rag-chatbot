@@ -128,6 +128,11 @@ Sayfa numaraları kanun metninden otomatik bulunur. Sorular ve doğru cevaplar
 `degerlendirme/is_kanunu.py` dosyasındadır. Sadece soru dosyasını hazırlamak için:
 `bash is_kanunu_testi.sh --hazirla`.
 
+**Deney: resmî PageIndex kütüphanesi.** `bash pageindex_resmi_testi.sh` aynı testi VectifyAI'ın resmî
+kütüphanesiyle (Ollama üzerinden, tamamen yerel) çalıştırır ve vektör yöntemimizle karşılaştırır.
+Kütüphane uygulamaya eklenmez, ayrı bir ortama kurulur. Süre: yaklaşık 1 saat. Ayrıntılar:
+[ARCHITECTURE.md](ARCHITECTURE.md#11-ikinci-arama-yöntemi-pageindex)
+
 Ayrıntılar: [ARCHITECTURE.md](ARCHITECTURE.md#10-cevap-kalitesi-değerlendirmesi)
 
 ## Yedekleme
